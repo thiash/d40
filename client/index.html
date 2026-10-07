@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1f2b22">
+<title>D40</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:ital,wght@0,500;0,700;1,500&family=Cinzel:wght@700&display=swap">
+<style>
+  :root {
+    --moss: rgba(31, 43, 34, 0.66);      /* Glas über der Welt */
+    --bone: #ece3cc;                     /* Schrift */
+    --bone-dim: rgba(236, 227, 204, 0.66);
+    --brass: #c9a24a;                    /* Ränder, Knauf, Abklingring */
+    --madder: #9c2f26;                   /* Angriff, Leben */
+    --woad: #3f5f93;                     /* Mana */
+    --lichen: #8fc77a;                   /* verbunden */
+    --amber: #e3b04b;                    /* verbindet */
+    --ember: #d9583b;                    /* getrennt */
+    --sans: "Alegreya Sans", "Trebuchet MS", system-ui, sans-serif;
+    --display: "Cinzel", "Trajan Pro", Georgia, serif;
+    --sat: env(safe-area-inset-top, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #a9cfe0; color: var(--bone); font-family: var(--sans);
+    touch-action: none; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .glass {
+    background: var(--moss); border: 1px solid rgba(201, 162, 74, 0.35);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+
+  /* Statusleiste oben links */
+  #status {
+    position: fixed; top: calc(var(--sat) + 12px); left: calc(var(--sal) + 12px);
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 14px 6px 12px; border-radius: 999px;
+    font-size: 15px; line-height: 1.2; font-weight: 500;
+  }
+  #status .mark { font: 700 15px/1 var(--display); letter-spacing: 0.06em; color: var(--brass); }
+  #status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; }
+  #status[data-state="online"] .dot { background: var(--lichen); }
+  #status[data-state="offline"] .dot { background: var(--ember); }
+  #status[data-state="connecting"] .dot { animation: pulse 1s ease-in-out infinite; }
+  #status .ping { color: var(--bone-dim); font-size: 13px; }
+  #status .ping:empty { display: none; }
+  @keyframes pulse { 50% { opacity: 0.25; } }
+
+  /* Leben und Mana unter der Statusleiste */
+  #vitals {
+    position: fixed; top: calc(var(--sat) + 52px); left: calc(var(--sal) + 12px);
+    width: 196px; padding: 7px 11px; border-radius: 12px;
+    display: grid; gap: 5px; pointer-events: none;
+  }
+  .vital { display: grid; grid-template-columns: 40px 1fr 58px; align-items: center; gap: 7px; font-size: 13px; }
+  .vital .name { color: var(--bone-dim); }
+  .vital .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .vital .track { height: 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.35); overflow: hidden; }
+  .vital .fill { display: block; height: 100%; width: 100%; border-radius: 4px; transition: width 0.25s ease-out; }
+  .fill.hp { background: linear-gradient(#d0574a, var(--madder)); }
+  .fill.mana { background: linear-gradient(#6f93c9, var(--woad)); }
+
+  /* Chronik: kurze Meldungen */
+  #log {
+    position: fixed; top: calc(var(--sat) + 112px); left: calc(var(--sal) + 16px);
+    max-width: min(78vw, 360px); pointer-events: none;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  #log .line {
+    font-style: italic; font-size: 15px; line-height: 1.35;
+    text-shadow: 0 1px 2px rgba(20, 28, 22, 0.9), 0 0 12px rgba(20, 28, 22, 0.55);
+    transition: opacity 0.6s;
+  }
+  #log .line.out { opacity: 0; }
+
+  /* Werte-Tafel oben rechts */
+  #stats-btn {
+    position: fixed; top: calc(var(--sat) + 12px); right: calc(var(--sar) + 12px);
+    padding: 6px 15px; border-radius: 999px; cursor: pointer;
+    color: var(--bone); font: 500 15px/1.2 var(--sans);
+  }
+  #stats-btn[aria-expanded="true"] { border-color: var(--brass); color: var(--brass); }
+  #stats {
+    position: fixed; top: calc(var(--sat) + 52px); right: calc(var(--sar) + 12px);
+    width: 220px; padding: 10px 14px 12px; border-radius: 12px;
+    background: rgba(31, 43, 34, 0.84);
+  }
+  #stats[hidden], #ko[hidden] { display: none; }
+  #stats dl {
+    margin: 0; display: grid; grid-template-columns: 1fr auto; row-gap: 3px; column-gap: 12px;
+    font-size: 15px; line-height: 1.3;
+  }
+  #stats dt { color: var(--bone-dim); }
+  #stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  #stats dt:nth-of-type(6), #stats dd:nth-of-type(6) {
+    margin-top: 5px; padding-top: 6px; border-top: 1px solid rgba(201, 162, 74, 0.3);
+  }
+  #stats .note { margin: 10px 0 0; font-size: 13px; line-height: 1.4; color: var(--bone-dim); font-style: italic; }
+
+  /* Joystick, nur auf Touch-Geräten sichtbar */
+  #stick {
+    position: fixed; width: 124px; height: 124px; margin: -62px 0 0 -62px;
+    left: calc(var(--sal) + 96px); top: calc(100% - var(--sab) - 112px);
+    border-radius: 50%; border: 1.5px solid rgba(201, 162, 74, 0.55);
+    background: radial-gradient(circle, rgba(31, 43, 34, 0.15) 40%, rgba(31, 43, 34, 0.45));
+    opacity: 0.45; pointer-events: none; display: none;
+    transition: opacity 0.25s;
+  }
+  body.touch #stick { display: block; }
+  #stick.active { opacity: 1; transition: none; }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+    border-radius: 50%; border: 1px solid rgba(80, 60, 20, 0.6);
+    background: radial-gradient(circle at 36% 30%, #f3e2b3, var(--brass) 62%, #8a6a2a);
+    box-shadow: 0 4px 10px rgba(20, 28, 22, 0.45);
+  }
+
+  /* Siegel: der große Angriff und drei kleine darum herum */
+  #attack, .act {
+    position: fixed; padding: 0; border-radius: 50%; color: #f6e7c4; cursor: pointer;
+    display: grid; place-items: center; touch-action: none; font-family: var(--sans);
+    box-shadow: 0 6px 16px rgba(20, 28, 22, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.16),
+                inset 0 -3px 6px rgba(0, 0, 0, 0.3);
+  }
+  #attack {
+    right: calc(var(--sar) + 26px); bottom: calc(var(--sab) + 30px);
+    width: 92px; height: 92px; border: 3px solid var(--brass);
+    background:
+      radial-gradient(circle, transparent 58%, rgba(0, 0, 0, 0.2) 60%, transparent 63%),
+      radial-gradient(circle at 34% 28%, #c8493d, var(--madder) 58%, #6e1f19);
+  }
+  #attack .icon { width: 34px; height: 34px; margin-top: -12px; }
+  #attack .label { bottom: 15px; font-size: 13px; }
+  .act { width: 62px; height: 62px; border: 2px solid var(--brass); }
+  .act .icon { width: 24px; height: 24px; margin-top: -11px; }
+  .act .label { bottom: 9px; font-size: 11.5px; }
+  .icon { filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.35)); }
+  .label { position: absolute; left: 0; right: 0; text-align: center; font-weight: 700; letter-spacing: 0.02em; }
+  #weapon {
+    right: calc(var(--sar) + 132px); bottom: calc(var(--sab) + 34px);
+    background: radial-gradient(circle at 34% 28%, #9b7448, #6a4a2c 60%, #3f2b19);
+  }
+  #spell {
+    right: calc(var(--sar) + 116px); bottom: calc(var(--sab) + 112px);
+    background: radial-gradient(circle at 34% 28%, #e98a4f, #b4471f 60%, #6e2a12);
+  }
+  #heal {
+    right: calc(var(--sar) + 40px); bottom: calc(var(--sab) + 140px);
+    background: radial-gradient(circle at 34% 28%, #9cc47c, #4f7d3a 60%, #2c4a22);
+  }
+  .act.low { filter: saturate(0.25) brightness(0.72); }
+  body.is-ko #attack, body.is-ko .act { filter: grayscale(1) brightness(0.6); }
+  .ring {
+    position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px);
+    transform: rotate(-90deg); pointer-events: none;
+  }
+  #attack .ring { inset: -9px; width: calc(100% + 18px); height: calc(100% + 18px); }
+  .ring circle {
+    fill: none; stroke: var(--brass); stroke-width: 4; stroke-linecap: round;
+    stroke-dasharray: 289; stroke-dashoffset: 289; opacity: 0;
+  }
+  .cool { animation: press 0.2s ease-out; }
+  .cool .ring circle { animation: cool var(--cd, 0.9s) linear forwards; }
+  #attack:focus-visible, .act:focus-visible, #stats-btn:focus-visible { outline: 3px solid var(--bone); outline-offset: 5px; }
+  @keyframes press { 40% { transform: scale(0.9); } }
+  @keyframes cool {
+    0% { stroke-dashoffset: 289; opacity: 1; }
+    94% { stroke-dashoffset: 0; opacity: 1; }
+    100% { stroke-dashoffset: 0; opacity: 0; }
+  }
+
+  /* Treffer und Bewusstlosigkeit */
+  #hurt {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(156, 47, 38, 0.6));
+  }
+  #hurt.on { animation: hurt 0.5s ease-out; }
+  @keyframes hurt { 0% { opacity: 1; } 100% { opacity: 0; } }
+  #ko {
+    position: fixed; inset: 0; display: grid; place-content: center; text-align: center;
+    pointer-events: none; padding: 0 24px;
+    background: radial-gradient(ellipse at center, rgba(20, 28, 22, 0.2), rgba(20, 28, 22, 0.78));
+  }
+  #ko .title { margin: 0; font: 700 34px/1 var(--display); letter-spacing: 0.04em; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+  #ko-text { margin: 12px 0 0; font-size: 17px; font-style: italic; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+
+  /* Tastatur-Hinweis am PC */
+  #hint {
+    position: fixed; left: 50%; bottom: calc(var(--sab) + 18px); transform: translateX(-50%);
+    display: flex; gap: 18px; padding: 8px 18px; border-radius: 999px;
+    background: var(--moss); font-size: 14px; color: var(--bone-dim); white-space: nowrap;
+  }
+  #hint kbd {
+    font: 700 13px/1 var(--sans); color: var(--bone);
+    border: 1px solid rgba(236, 227, 204, 0.35); border-bottom-width: 2px; border-radius: 5px;
+    padding: 3px 6px; margin-right: 6px;
+  }
+  body.touch #hint { display: none; }
+  @media (max-width: 980px) { #hint { display: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    #log .line, .vital .fill { transition: none; }
+    .cool, #hurt.on { animation: none; }
+    #status[data-state="connecting"] .dot { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="hurt" aria-hidden="true"></div>
+  <div id="ko" role="status" hidden>
+    <p class="title">Bewusstlos</p>
+    <p id="ko-text">Du kommst gleich wieder zu dir.</p>
+  </div>
+
+  <div id="status" class="glass" data-state="connecting" role="status" aria-live="polite">
+    <span class="mark">D40</span>
+    <span class="dot" aria-hidden="true"></span>
+    <span id="status-text">Starte…</span>
+    <span id="ping" class="ping"></span>
+  </div>
+  <div id="vitals" class="glass">
+    <div class="vital">
+      <span class="name">Leben</span>
+      <span class="track"><span id="hp-bar" class="fill hp"></span></span>
+      <span id="hp-text" class="num">100 / 100</span>
+    </div>
+    <div class="vital">
+      <span class="name">Mana</span>
+      <span class="track"><span id="mana-bar" class="fill mana"></span></span>
+      <span id="mana-text" class="num">60 / 60</span>
+    </div>
+  </div>
+  <div id="log" aria-live="polite"></div>
+
+  <button id="stats-btn" class="glass" type="button" aria-expanded="false" aria-controls="stats">Werte</button>
+  <section id="stats" class="glass" aria-label="Charakterwerte" hidden>
+    <dl id="stats-list"></dl>
+    <p class="note">Du wirst besser in dem, was du tust: Schwert macht stark, Bogen beweglich, Einstecken zäh.</p>
+  </section>
+
+  <div id="stick" aria-hidden="true"><div id="knob"></div></div>
+
+  <button id="attack" type="button" aria-label="Angreifen (Leertaste)">
+    <svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46"/></svg>
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M8 16 L19.5 4.5"/><path d="M5.5 13.5 L10.5 18.5"/><path d="M8 16 L4.5 19.5"/>
+    </svg>
+    <span class="label">Angreifen</span>
+  </button>
+  <button id="weapon" class="act" type="button" aria-label="Waffe wechseln (Q)">
+    <svg id="weapon-icon" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>
+    <span id="weapon-label" class="label">Schwert</span>
+  </button>
+  <button id="spell" class="act" type="button" aria-label="Intelligenzzauber wirken (E)">
+    <svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46"/></svg>
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 3c3 3.6 5.5 6 5.5 10a5.5 5.5 0 0 1-11 0c0-2.4 1.3-4 2.6-5.2.3 1.9 1.2 3 2.3 3.4-.7-2.8-.4-5.6.6-8.2z"/>
+    </svg>
+    <span class="label">Zauber</span>
+  </button>
+  <button id="heal" class="act" type="button" aria-label="Weisheitszauber: heilen (R)">
+    <svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46"/></svg>
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M7.5 12h9"/>
+    </svg>
+    <span class="label">Heilen</span>
+  </button>
+
+  <div id="hint">
+    <span><kbd>WASD</kbd>laufen</span>
+    <span><kbd>Leertaste</kbd>angreifen</span>
+    <span><kbd>Q</kbd>Waffe</span>
+    <span><kbd>E</kbd>Zauber</span>
+    <span><kbd>R</kbd>heilen</span>
+    <span><kbd>C</kbd>Werte</span>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="world.js"></script>
+  <script src="net.js"></script>
+  <script src="combat.js"></script>
+  <script>
+'use strict';
+// Spielschleife: hält Welt, Steuerung, Netzwerk und Kampf im Takt
+let lastFrame = performance.now();
+function frame() {
+  requestAnimationFrame(frame);
+  const now = performance.now();
+  const dt = Math.min((now - lastFrame) / 1000, 0.1);
+  lastFrame = now;
+  updateMe(dt);
+  updateOthers(dt);
+  updateCreatures(dt);
+  updateCamera(dt);
+  updateNet(dt);
+  updateFx(dt);
+  renderer.render(scene, camera);
+}
+
+setMe('Du', 0xa8443a);
+connect();
+frame();
+  </script>
+</body>
+</html>
