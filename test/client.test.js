@@ -115,6 +115,7 @@ function makeEl(id, hidden = false) {
   run('net.js');
   run('combat.js');
   run('items.js');
+  run('admin.js');
   vm.runInContext(inline, ctx, { filename: 'index.html' });
 
   async function pump(ms) {
@@ -362,6 +363,9 @@ function makeEl(id, hidden = false) {
   teleport(15, 15);
   await pump(150);
   ok('Weggehen schließt das Lagerfeuer-Menü', el('craft').hidden === true);
+
+  ok('Verwaltung ist für normale Spieler verborgen', el('admin-btn').hidden === true && el('admin').hidden === true);
+  ok('Gebäude blockieren im Client wie im Server', ev('inBuilding(-24, -16)') === true && ev('inBuilding(0, 0)') === false);
 
   // ---- Abmelden ----
   const before = { ...P().a };

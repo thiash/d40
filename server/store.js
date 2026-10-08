@@ -111,8 +111,19 @@ class MemoryStore {
   async createAccount(name, key, pass) {
     if (this.accounts.has(key)) return null;
     const id = this.nextId++;
-    this.accounts.set(key, { id, name, pass });
+    this.accounts.set(key, { id, name, pass, admin: false, banned: false });
     return id;
+  }
+  async searchAccounts(prefix) {
+    return [...this.accounts.entries()]
+      .filter(([k]) => k.startsWith(prefix)).sort(([a], [b]) => (a < b ? -1 : 1)).slice(0, 10)
+      .map(([, a]) => ({ id: a.id, name: a.name, banned: a.banned }));
+  }
+  async setAccountFlags(key, flags) {
+    const a = this.accounts.get(key);
+    if (!a) return;
+    if (typeof flags.admin === 'boolean') a.admin = flags.admin;
+    if (typeof flags.banned === 'boolean') a.banned = flags.banned;
   }
   async loadCharacter(id) {
     const json = this.characters.get(id);
@@ -132,7 +143,7 @@ class MemoryStore {
       return null;
     }
     s.lastUsed = Date.now();
-    for (const a of this.accounts.values()) if (a.id === s.id) return { id: a.id, name: a.name };
+    for (const a of this.accounts.values()) if (a.id === s.id) return { id: a.id, name: a.name, admin: !!a.admin, banned: !!a.banned };
     return null;
   }
   async deleteSession(tokenHash) {
@@ -162,6 +173,8 @@ const SCHEMA = [
      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
      last_login TIMESTAMPTZ
    )`,
+  'ALTER TABLE d40_accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false',
+  'ALTER TABLE d40_accounts ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT false',
   `CREATE TABLE IF NOT EXISTS d40_characters (
      account_id BIGINT PRIMARY KEY REFERENCES d40_accounts (id) ON DELETE CASCADE,
      data JSONB NOT NULL,
@@ -179,7 +192,9 @@ const SCHEMA = [
 const SQL = {
   ping: 'SELECT 1 AS ok',
   cleanup: `DELETE FROM d40_sessions WHERE last_used < now() - interval '${SESSION_DAYS} days'`,
-  findAccount: 'SELECT id::text AS id, name, pass FROM d40_accounts WHERE name_key = $1',
+  findAccount: 'SELECT id::text AS id, name, pass, is_admin AS admin, banned FROM d40_accounts WHERE name_key = $1',
+  searchAccounts: 'SELECT id::text AS id, name, name_key, banned FROM d40_accounts WHERE name_key LIKE $1 ORDER BY name_key LIMIT 10',
+  setAccountFlags: 'UPDATE d40_accounts SET is_admin = COALESCE($2::boolean, is_admin), banned = COALESCE($3::boolean, banned) WHERE name_key = $1',
   createAccount: 'INSERT INTO d40_accounts (name, name_key, pass) VALUES ($1, $2, $3) '
     + 'ON CONFLICT (name_key) DO NOTHING RETURNING id::text AS id',
   touchAccount: 'UPDATE d40_accounts SET last_login = now() WHERE id = $1::bigint',
@@ -187,7 +202,7 @@ const SQL = {
   saveCharacter: 'INSERT INTO d40_characters (account_id, data, updated_at) VALUES ($1::bigint, $2::jsonb, now()) '
     + 'ON CONFLICT (account_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()',
   createSession: 'INSERT INTO d40_sessions (token_hash, account_id) VALUES ($1, $2::bigint)',
-  findSession: 'SELECT a.id::text AS id, a.name FROM d40_sessions s JOIN d40_accounts a ON a.id = s.account_id '
+  findSession: 'SELECT a.id::text AS id, a.name, a.is_admin AS admin, a.banned FROM d40_sessions s JOIN d40_accounts a ON a.id = s.account_id '
     + `WHERE s.token_hash = $1 AND s.last_used > now() - interval '${SESSION_DAYS} days'`,
   touchSession: 'UPDATE d40_sessions SET last_used = now() WHERE token_hash = $1',
   deleteSession: 'DELETE FROM d40_sessions WHERE token_hash = $1',
@@ -395,7 +410,15 @@ class SqlStore {
 
   async findAccount(key) {
     const [row] = await this.q(SQL.findAccount, [key]);
-    return row ? { id: Number(row.id), name: row.name, pass: row.pass } : null;
+    return row ? { id: Number(row.id), name: row.name, pass: row.pass, admin: !!row.admin, banned: !!row.banned } : null;
+  }
+  async searchAccounts(prefix) {
+    const rows = await this.q(SQL.searchAccounts, [prefix + '%']);
+    return rows.map((r) => ({ id: Number(r.id), name: r.name, banned: !!r.banned }));
+  }
+  async setAccountFlags(key, flags) {       // flags: { admin?, banned? } – nur was angegeben ist, ändert sich
+    const f = (v) => (typeof v === 'boolean' ? v : null);
+    await this.q(SQL.setAccountFlags, [key, f(flags.admin), f(flags.banned)]);
   }
   async createAccount(name, key, pass) {
     const [row] = await this.q(SQL.createAccount, [name, key, pass]);
@@ -419,7 +442,7 @@ class SqlStore {
     const [row] = await this.q(SQL.findSession, [tokenHash]);
     if (!row) return null;
     await this.q(SQL.touchSession, [tokenHash]);   // gilt ab jetzt wieder volle 60 Tage
-    return { id: Number(row.id), name: row.name };
+    return { id: Number(row.id), name: row.name, admin: !!row.admin, banned: !!row.banned };
   }
   async deleteSession(tokenHash) {
     await this.q(SQL.deleteSession, [tokenHash]);
@@ -455,7 +478,7 @@ function createStore(raw, opts = {}) {
 }
 
 module.exports = {
-  createStore, MemoryStore, SqlStore, SQL, SCHEMA, SESSION_DAYS,
+  createStore, MemoryStore, SqlStore, SQL, SCHEMA, SESSION_DAYS, NAME_RE,
   hashPassword, verifyPassword, newToken, hashToken, checkName, checkPassword,
   httpEndpoint, httpDriver, pgDriver, pgUrl, toParam,
 };

@@ -423,6 +423,9 @@ function onMessage(msg) {
     case 'pong':
       net.ping = Math.round(performance.now() - msg.ts);
       break;
+    case 'admin':                   // Antwort auf einen Verwaltungs-Befehl → admin.js
+      onAdminMessage(msg);
+      break;
     default:                        // attack, cast, hitE, hitP, you, ko, revive → combat.js
       onCombat(msg);
   }
@@ -476,8 +479,11 @@ function updateMe(dt) {
     // – genau wie der Server rechnet
     const speed = RULES.speed * (me.self.mv ?? 1) * (me.self.spd ?? 1);
     const lim = RULES.worldHalf;
-    me.x = clamp(me.x + dx * speed * dt, -lim, lim);
-    me.z = clamp(me.z + dz * speed * dt, -lim, lim);
+    // Gebäude blockieren: jede Achse einzeln, damit man an der Mauer entlanggleitet
+    const nx = clamp(me.x + dx * speed * dt, -lim, lim);
+    const nz = clamp(me.z + dz * speed * dt, -lim, lim);
+    if (!inBuilding(nx, me.z)) me.x = nx;
+    if (!inBuilding(me.x, nz)) me.z = nz;
     me.ry = Math.atan2(dx, dz);
   }
   animateCharacter(me.model, me.x, me.z, me.ry, strength * RULES.speed * (me.self.mv ?? 1) * (me.self.spd ?? 1), dt);

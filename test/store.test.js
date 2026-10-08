@@ -231,7 +231,7 @@ function getJson(port, path) {
     const r = await mira.answer();
     ok('Neuer Charakter über die HTTP-Schnittstelle', r.t === 'welcome' && r.you.name === 'Mira', JSON.stringify(r));
     ok('Kopfzeilen und Adresse entsprechen Neons Protokoll', fake.badHeaders.length === 0, fake.badHeaders.join(', '));
-    ok('Tabellen werden angelegt', engine.schema.length === 4);
+    ok('Tabellen und Spalten werden angelegt', engine.schema.length === 6);
     await sleep(150);
     const acc = engine.accounts.get('mira');
     ok('Konto und Charakter liegen in der Datenbank', acc && acc.pass.startsWith('scrypt$') && engine.chars.has(String(acc.id)));

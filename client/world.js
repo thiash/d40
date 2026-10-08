@@ -5,8 +5,19 @@
 // ===========================================================================
 
 // ---- Regeln (der Server schickt beim Verbinden seine eigenen Werte) ----
+// Gebäude sind feste Hindernisse (der Server prüft dieselbe Liste)
+const BUILDINGS = [
+  { x: -14, z: -8, w: 4, d: 3.4, h: 2.4, kind: 'forge' },
+  { x: -24, z: -16, w: 3, d: 2.6, h: 2.2, kind: 'house' },
+  { x: 10, z: -20, w: 2.6, d: 2.4, h: 2, kind: 'house' },
+];
+const BUILDING_PAD = 0.35;          // Abstand, den die Spielfigur zu Mauern hält
+const inBuilding = (x, z) => BUILDINGS.some((b) =>
+  Math.abs(x - b.x) < b.w / 2 + BUILDING_PAD && Math.abs(z - b.z) < b.d / 2 + BUILDING_PAD);
+
 const RULES = {
   speed: 6, worldHalf: 95, spellCooldown: 1500, reviveMs: 20000,
+  buildings: BUILDINGS,
   weapons: { heavy: 'Schwert', dagger: 'Dolch', bow: 'Bogen' },
   spells: { int: { name: 'Intelligenzzauber', cost: 5 }, wis: { name: 'Weisheitszauber', cost: 6 } },
   enemies: { hare: 'Hase', wolf: 'Wolf', boar: 'Keiler' },
@@ -617,7 +628,7 @@ function makeChest(x, z) {
 const VM = {
   stone: new THREE.MeshLambertMaterial({ color: 0x8b8377 }),
   wall:  new THREE.MeshLambertMaterial({ color: 0xa88a62 }),
-  roof:  new THREE.MeshLambertMaterial({ color: 0x5b3a2a }),
+  roof:  new THREE.MeshLambertMaterial({ color: 0x5b3a2a, side: THREE.DoubleSide }),
   dark:  new THREE.MeshLambertMaterial({ color: 0x2e2a27 }),
   ember: new THREE.MeshLambertMaterial({ color: 0xff7a2a, emissive: 0xff5a10 }),
   wood:  new THREE.MeshLambertMaterial({ color: 0x6e4a2c }),
@@ -638,21 +649,31 @@ function part(g, geo, mat, x = 0, y = 0, z = 0) {
   g.add(m);
   return m;
 }
-function house(x, z, angle, w, d, h) {
-  const g = place(x, z, angle);
-  part(g, box(w, h, d), VM.wall, 0, h / 2, 0);
-  part(g, flat(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 1.3, 4).rotateY(Math.PI / 4)), VM.roof, 0, h + 0.65, 0);
+// Walmdach: vier Dachflächen, die auf den Mauerkanten aufsitzen und leicht überstehen
+function roofGeo(w, d, ht) {
+  const ow = w / 2 + 0.12, od = d / 2 + 0.12;
+  const c = [[-ow, 0, -od], [ow, 0, -od], [ow, 0, od], [-ow, 0, od]];
+  const apex = [0, ht, 0];
+  const pos = [];
+  for (let i = 0; i < 4; i++) pos.push(...c[i], ...c[(i + 1) % 4], ...apex);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+function buildHouse(b) {
+  const g = place(b.x, b.z, 0);
+  part(g, box(b.w, b.h, b.d), b.kind === 'forge' ? VM.stone : VM.wall, 0, b.h / 2, 0);
+  part(g, roofGeo(b.w, b.d, 1.3), VM.roof, 0, b.h, 0);
   return g;
 }
 
 function makeVillage() {
   // Schmiede: Mauern, Dach, Esse mit Glut, Amboss und Schornstein
-  const forge = place(RULES.forge.x, RULES.forge.z, 0);
-  part(forge, box(4, 2.4, 3.4), VM.stone, 0, 1.2, 0);
-  part(forge, flat(new THREE.ConeGeometry(2.7, 1.3, 4).rotateY(Math.PI / 4)), VM.roof, 0, 2.75, 0);
-  part(forge, box(1.0, 0.8, 0.25), VM.ember, 0.9, 0.9, 1.75);
-  part(forge, box(0.6, 0.5, 0.4), VM.dark, -1.0, 0.25, 0.9);
-  part(forge, box(0.4, 1.8, 0.4), VM.stone, 1.3, 3.1, -0.9);
+  const forge = buildHouse(BUILDINGS[0]);
+  part(forge, box(1.0, 0.8, 0.25), VM.ember, 0.9, 0.9, BUILDINGS[0].d / 2 + 0.05);   // Esse vorne
+  part(forge, box(0.6, 0.5, 0.4), VM.dark, -1.0, 0.25, BUILDINGS[0].d / 2 + 0.6);    // Amboss davor
+  part(forge, box(0.4, 1.0, 0.4), VM.stone, 1.3, 2.9, -0.9);                         // Schornstein
 
   // Lagerfeuer: Steinkranz, Holz, flackernde Flamme
   const fire = place(RULES.fire.x, RULES.fire.z, 0);
@@ -664,8 +685,8 @@ function makeVillage() {
   part(fire, box(1.1, 0.16, 0.18), VM.wood, 0, 0.14, 0).rotation.y = -0.7;
   VILLAGE.flame = part(fire, new THREE.ConeGeometry(0.35, 0.9, 5), VM.ember, 0, 0.6, 0);
 
-  house(-24, -16, 0.4, 3, 2.6, 2.2);
-  house(10, -20, -0.3, 2.6, 2.4, 2);
+  buildHouse(BUILDINGS[1]);
+  buildHouse(BUILDINGS[2]);
 }
 
 function animateVillage(t) {               // Flamme flackert

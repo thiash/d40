@@ -106,6 +106,15 @@ const CRAFT = {
 const FOOD = { meat: { heal: 15 }, grilled_meat: { heal: 30 } };
 const FORGE = { x: -14, z: -8, reach: 3 };    // Schmiede im Dorf neben dem Startplatz
 const FIRE = { x: 14, z: -8, reach: 3 };      // Lagerfeuer zum Grillen
+// Gebäude sind feste Hindernisse – dieselbe Liste wie im Client (world.js)
+const BUILDINGS = [
+  { x: FORGE.x, z: FORGE.z, w: 4, d: 3.4, h: 2.4 },
+  { x: -24, z: -16, w: 3, d: 2.6, h: 2.2 },
+  { x: 10, z: -20, w: 2.6, d: 2.4, h: 2 },
+];
+const BUILDING_PAD = 0.35;
+const inBuilding = (x, z) => BUILDINGS.some((b) =>
+  Math.abs(x - b.x) < b.w / 2 + BUILDING_PAD && Math.abs(z - b.z) < b.d / 2 + BUILDING_PAD);
 const own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
 // Was ein besiegtes Tier fallen lässt: Chance p, Anzahl zwischen n[0] und n[1]
 const DROPS = {
@@ -131,7 +140,7 @@ const RULES = {                    // geht beim Verbinden an den Client
   reviveMs: COMBAT.reviveMs,
   weapons: Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, w.name])),
   craft: Object.fromEntries(Object.entries(CRAFT).map(([k, r]) => [k, r.cost])),
-  food: FOOD, forge: FORGE, fire: FIRE,
+  food: FOOD, forge: FORGE, fire: FIRE, buildings: BUILDINGS,
   spells: Object.fromEntries(Object.entries(SPELLS).map(([k, s]) => [k, { name: s.name, cost: s.cost }])),
   enemies: Object.fromEntries(Object.entries(ENEMY_KINDS).map(([k, e]) => [k, e.name])),
   items: ITEMS,
@@ -306,6 +315,7 @@ function selfView(p) {             // was nur der Spieler selbst über sich erf�
     cd: attackCooldown(p.a), dodge: Math.round(dodgeChance(p.a) * 100),
     heal: Math.round(healShare(p.a) * 1000) / 10,
     inv: { ...p.inv }, load, cap, spd: loadFactor(load, cap), mv: moveSpeedBonus(p.a),
+    admin: !!p.admin, hidden: !!p.hidden,
   };
 }
 
@@ -317,7 +327,11 @@ function send(p, msg) {
 }
 function broadcast(msg, exceptId) {
   const data = JSON.stringify(msg);
+  // Handlungen einer unsichtbaren Figur erfährt nur sie selbst
+  const src = msg.id !== undefined ? players.get(msg.id) : null;
+  const quiet = !!(src && src.hidden);
   for (const p of players.values()) {
+    if (quiet && p.id !== src.id) continue;
     if (p.id !== exceptId && p.ws.readyState === WebSocket.OPEN) p.ws.send(data);
   }
 }
@@ -373,6 +387,7 @@ function onConnection(ws, req) {
       case 'pick': handlePick(p, msg); break;
       case 'drop': handleDrop(p, msg); break;
       case 'chest': handleChest(p, msg); break;
+      case 'admin': handleAdmin(p, msg).catch((err) => log(`Verwaltung: ${err.message}`)); break;
       case 'craft': handleCraft(p, msg); break;
       case 'cook': handleCook(p, msg); break;
       case 'eat': handleEat(p, msg); break;
@@ -418,6 +433,7 @@ async function handleAuth(conn, msg) {
       }
       account = await db.findSession(hashToken(msg.token));
       if (!account) throw deny('token', 'Bitte melde dich neu an.');
+      if (account.banned) throw deny('banned', 'Dieses Konto ist gesperrt.');
       token = msg.token;
     } else {
       const n = checkName(msg.name);
@@ -448,7 +464,8 @@ async function handleAuth(conn, msg) {
         if (msg.t === 'register') throw deny('taken', `Den Namen „${n.name}“ gibt es schon. Wähle einen anderen.`);
         throw deny('pass', 'Das Passwort stimmt nicht.');
       }
-      account = { id: acc.id, name: acc.name };
+      if (acc.banned) throw deny('banned', 'Dieses Konto ist gesperrt.');
+      account = { id: acc.id, name: acc.name, admin: !!acc.admin };
       token = newToken();
       await db.createSession(hashToken(token), account.id);
       if (db.touchAccount) db.touchAccount(account.id).catch(() => {});
@@ -467,6 +484,79 @@ async function handleAuth(conn, msg) {
     }
   } finally {
     conn.busy = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Administrator-Figur: Suchen, Gegenstand geben, Sperren, Sichtbarkeit.
+// Jede Aktion prüft hier das Kennzeichen des Servers – die Oberfläche entscheidet nichts.
+// ---------------------------------------------------------------------------
+async function handleAdmin(p, msg) {
+  if (!p.admin) return;
+  const reply = (ok, text, extra = {}) => send(p, { t: 'admin', op: msg.op, ok, text, ...extra });
+  const who = typeof msg.name === 'string' ? msg.name.trim().replace(/\s+/g, ' ').slice(0, 16) : '';
+  const key = who.toLowerCase();
+  const isOnline = (id) => [...players.values()].some((q) => q.accountId === id);
+
+  if (msg.op === 'search') {
+    const rows = await db.searchAccounts(key);
+    const results = rows.map((r) => ({ name: r.name, banned: !!r.banned, online: isOnline(r.id) }));
+    return send(p, { t: 'admin', op: 'search', ok: true, results });
+  }
+
+  if (msg.op === 'visible') {
+    const show = msg.on === true;
+    if (show === !p.hidden) return reply(true, show ? 'Du bist schon sichtbar.' : 'Du bist schon unsichtbar.', { hidden: p.hidden });
+    if (show) {
+      p.hidden = false;
+      p.dirty = true;
+      broadcast({ t: 'join', player: publicPlayer(p) }, p.id);
+    } else {
+      broadcast({ t: 'leave', id: p.id }, p.id);   // zuerst gehen, dann unsichtbar
+      p.hidden = true;
+    }
+    log(`Verwaltung: ${p.name} ist jetzt ${show ? 'sichtbar' : 'unsichtbar'}`);
+    return reply(true, show ? 'Du bist wieder sichtbar.' : 'Du bist jetzt unsichtbar.', { hidden: p.hidden });
+  }
+
+  const acc = who ? await db.findAccount(key) : null;
+  if (!acc) return reply(false, `Den Spieler „${who}“ gibt es nicht.`);
+
+  if (msg.op === 'give') {
+    const k = msg.k, n = msg.n;
+    if (!isItem(k) || !Number.isInteger(n) || n < 1 || n > 9999) return reply(false, 'Gegenstand oder Anzahl stimmt nicht.');
+    const online = onlineAs(acc.id);
+    if (online) {
+      addItems(online.inv, { [k]: n });
+      online.dirty = true;
+      sendSelf(online, { got: { [k]: n } });
+    } else {
+      const data = await db.loadCharacter(acc.id);
+      if (!data) return reply(false, `${acc.name} hat noch keine Figur.`);
+      const inv = cleanItems(data.inv);
+      addItems(inv, { [k]: n });
+      data.inv = inv;
+      await db.saveCharacter(acc.id, data);
+    }
+    log(`Verwaltung: ${p.name} gibt ${acc.name} ${n} × ${k}`);
+    return reply(true, `${n} × ${ITEMS[k].name} an ${acc.name} gegeben.`);
+  }
+
+  if (msg.op === 'ban') {
+    const on = msg.on === true;
+    if (acc.id === p.accountId) return reply(false, 'Du kannst dein eigenes Konto nicht sperren.');
+    await db.setAccountFlags(key, { banned: on });
+    if (on) {
+      const online = onlineAs(acc.id);
+      if (online) {
+        send(online, { t: 'kicked', text: 'Dein Konto ist gesperrt.' });
+        online.conn.player = null;
+        leaveWorld(online, { save: true });
+        online.ws.close(4003, 'banned');
+      }
+    }
+    log(`Verwaltung: ${p.name} ${on ? 'sperrt' : 'entsperrt'} ${acc.name}`);
+    return reply(true, on ? `${acc.name} ist gesperrt.` : `${acc.name} ist wieder frei.`, { name: acc.name, banned: on });
   }
 }
 
@@ -510,18 +600,24 @@ async function enterWorld(conn, account, token, fresh) {
     t: 'welcome',
     you: publicPlayer(p),
     self: selfView(p),
-    players: [...players.values()].filter((o) => o.id !== p.id).map(publicPlayer),
+    players: [...players.values()].filter((o) => o.id !== p.id && !o.hidden).map(publicPlayer),
     enemies: [...enemies.values()].map(publicEnemy),
     loots: [...loots.values()].map((l) => publicLoot(l, p)),
     rules: RULES,
   });
-  broadcast({ t: 'join', player: publicPlayer(p) }, p.id);
+  if (!p.hidden) broadcast({ t: 'join', player: publicPlayer(p) }, p.id);
   log(`${p.name} betritt die Welt (${players.size} online)`);
   maintainEnemies();
   if (!p.savedJson) savePlayer(p);           // neuer Charakter: sofort festhalten
 }
 
 // Gespeicherte Werte übernehmen, aber nichts ungeprüft glauben
+// Admin-Namen aus der Umgebungsvariable ADMIN_NAMES (Komma-getrennt), z. B. in Render eingetragen
+function isEnvAdmin(name) {
+  return (process.env.ADMIN_NAMES || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    .includes(String(name).toLowerCase());
+}
+
 function createPlayer(conn, account, data) {
   const now = Date.now();
   const d = data && typeof data === 'object' ? data : {};
@@ -552,6 +648,7 @@ function createPlayer(conn, account, data) {
     ko: false, koAt: 0, safeUntil: 0, autoTarget: null,
     corr: 0, dirty: false,
     savedJson: null, saveChain: Promise.resolve(), tokenHash: null, left: false,
+    admin: !!account.admin || isEnvAdmin(account.name), hidden: false,
   };
   // Bewusstlos abgemeldet: Die Erholung beginnt von vorn – Abmelden ist keine Abkürzung.
   if (p.hp <= Math.round(hpMax * COMBAT.koShare)) {
@@ -596,7 +693,7 @@ function leaveWorld(p, opts = {}) {
   p.left = true;
   players.delete(p.id);
   for (const e of enemies.values()) if (e.target === p.id) e.target = null;
-  broadcast({ t: 'leave', id: p.id });
+  if (!p.hidden) broadcast({ t: 'leave', id: p.id });
   log(`${p.name} verlässt die Welt (${players.size} online)`);
   if (opts.save === false) return;
   const pr = savePlayer(p);
@@ -632,7 +729,7 @@ function handleMove(p, msg) {
 
   const d = Math.hypot(x - p.x, z - p.z);
   const outside = Math.abs(x) > RULES.worldHalf || Math.abs(z) > RULES.worldHalf;
-  if (d > p.budget || outside) {
+  if (d > p.budget || outside || inBuilding(x, z)) {     // durch Mauern geht niemand
     p.corr++;
     send(p, { t: 'correct', n: p.corr, x: r2(p.x), z: r2(p.z) });
     return;
@@ -1082,7 +1179,7 @@ function tick() {
 
   const pc = [], ec = [];
   for (const p of players.values()) {
-    if (!p.dirty) continue;
+    if (!p.dirty || p.hidden) continue;
     pc.push([p.id, r2(p.x), r2(p.z), r2(p.ry), Math.round(p.hp), p.hpMax, p.ko ? 1 : 0]);
     p.dirty = false;
   }
@@ -1193,7 +1290,7 @@ if (require.main === module) {
 // Für die automatischen Tests
 module.exports = {
   start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding, isEnvAdmin,
   carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,
