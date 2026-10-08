@@ -612,6 +612,12 @@ async function enterWorld(conn, account, token, fresh) {
 }
 
 // Gespeicherte Werte übernehmen, aber nichts ungeprüft glauben
+// Admin-Namen aus der Umgebungsvariable ADMIN_NAMES (Komma-getrennt), z. B. in Render eingetragen
+function isEnvAdmin(name) {
+  return (process.env.ADMIN_NAMES || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    .includes(String(name).toLowerCase());
+}
+
 function createPlayer(conn, account, data) {
   const now = Date.now();
   const d = data && typeof data === 'object' ? data : {};
@@ -642,7 +648,7 @@ function createPlayer(conn, account, data) {
     ko: false, koAt: 0, safeUntil: 0, autoTarget: null,
     corr: 0, dirty: false,
     savedJson: null, saveChain: Promise.resolve(), tokenHash: null, left: false,
-    admin: !!account.admin, hidden: false,
+    admin: !!account.admin || isEnvAdmin(account.name), hidden: false,
   };
   // Bewusstlos abgemeldet: Die Erholung beginnt von vorn – Abmelden ist keine Abkürzung.
   if (p.hp <= Math.round(hpMax * COMBAT.koShare)) {
@@ -1284,7 +1290,7 @@ if (require.main === module) {
 // Für die automatischen Tests
 module.exports = {
   start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding, isEnvAdmin,
   carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,

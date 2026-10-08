@@ -859,6 +859,10 @@ function get(port, urlPath) {
   });
 
   await safely('Administrator-Figur', async () => {
+    const oldEnv = process.env.ADMIN_NAMES;
+    process.env.ADMIN_NAMES = ' Creator , Mira';
+    ok('ADMIN_NAMES: Namen aus der Umgebung zählen, ohne Groß- und Kleinschreibung', S.isEnvAdmin('creator') && S.isEnvAdmin('MIRA') && !S.isEnvAdmin('Tester1'));
+    process.env.ADMIN_NAMES = oldEnv;
     a.p.admin = true;                                // Kennzeichen wie vom Skript gesetzt
     a.p.inv = {};
     let from = a.mark();

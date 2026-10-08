@@ -46,6 +46,14 @@ spricht Neon über dessen HTTP-Schnittstelle an.
 Ob das Speichern funktioniert, zeigt die Seite **/status**
 (zum Beispiel `https://<dein-dienst>.onrender.com/status`).
 
+## Administrator
+
+Die Verwaltung erscheint oben rechts, wenn ein Charakter Administrator ist. Admins bestimmt
+die Umgebungsvariable `ADMIN_NAMES` (bei Render unter **Environment**), mit Komma getrennte
+Charakternamen, zum Beispiel `Creator`. Gleichgültig ob Groß- oder Kleinschreibung.
+Den Charakter legt man ganz normal im Spiel an. Wird der Name aus der Liste entfernt,
+verliert er die Rechte beim nächsten Anmelden.
+
 ## Starten am eigenen Rechner (Node.js 18 oder neuer)
 
 ```bash
