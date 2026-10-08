@@ -3,43 +3,53 @@
 Ein Browser-MMORPG für Smartphones, inspiriert von »Die vierte Offenbarung« (D4O).
 Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.js.
 
-## Stand: Schritt 1 – Client und Server sprechen miteinander
+## Stand: Schritt 3 – Anmeldung und Speichern
 
-- Mehrere Spieler sehen sich gegenseitig laufen und angreifen.
-- Der Server ist autoritativ und prüft jede Bewegung (Schutz vor Speedhacks).
-- Handy: Joystick links, rechts wischen dreht die Kamera, Siegel-Button greift an.
-- PC: WASD laufen, Maus ziehen dreht die Kamera, Mausrad zoomt, Leertaste greift an.
+- **Schritt 1:** Mehrere Spieler sehen sich gegenseitig, der Server prüft jede Bewegung.
+- **Schritt 2:** Tiere (Hase, Wolf, Keiler), Kampf mit Schwert, Dolch, Bogen und zwei Zaubern,
+  Lernen durch Tun, Ausweichen, K.O. statt Tod.
+- **Schritt 3:** Anmeldung mit Name und Passwort, beim ersten Mal entsteht der Charakter.
+  Das Gerät merkt sich die Anmeldung. Gespeichert werden Ort, Attribute, Leben, Mana und
+  Waffe – alle 30 Sekunden, beim Verlassen und vor jedem Neustart des Servers.
+  Die Werte-Tafel zeigt die Summe aller Attribute (Grundlage der späteren Wiedergeburts-Quest).
 
-## Starten
+## Steuerung
 
-### Am eigenen Rechner (Node.js 18 oder neuer)
+- Handy: Joystick links, rechts wischen dreht die Kamera, Knöpfe rechts für Angriff,
+  Waffe, Zauber und Heilen. „Werte“ oben rechts öffnet die Tafel mit dem Abmelde-Knopf.
+- PC: WASD laufen, Maus ziehen dreht die Kamera, Mausrad zoomt,
+  Leertaste angreifen, Q Waffe, E Zauber, R heilen, C Werte.
+
+## Datenbank
+
+Gespeichert wird in einer Postgres-Datenbank (zum Beispiel kostenlos bei Neon).
+Der Server liest ihre Adresse aus der Umgebungsvariable `DATABASE_URL`
+(bei Render unter **Environment**). Die Adresse enthält das Datenbank-Passwort:
+Sie gehört nie ins Repository.
+
+Ohne `DATABASE_URL` läuft das Spiel trotzdem, speichert aber nur im Arbeitsspeicher –
+nach einem Neustart ist alles weg. Ein zusätzliches Paket ist nicht nötig: Der Server
+spricht Neon über dessen HTTP-Schnittstelle an.
+
+Ob das Speichern funktioniert, zeigt die Seite **/status**
+(zum Beispiel `https://<dein-dienst>.onrender.com/status`).
+
+## Starten am eigenen Rechner (Node.js 18 oder neuer)
 
 ```bash
 npm install
 npm start
 ```
 
-Dann im Browser `http://localhost:3000` öffnen. Zum Testen einfach ein zweites
-Fenster öffnen – jedes Fenster ist ein eigener Spieler.
-Ein Handy im selben WLAN erreicht das Spiel über `http://<IP-deines-Rechners>:3000`.
-
-### Ohne Installation: GitHub Codespaces
-
-1. Im Repository auf **Code → Codespaces → Create codespace on main**.
-2. Im Terminal unten `npm install` und danach `npm start` eingeben.
-3. Beim Hinweis zu Port 3000 auf **Open in Browser** klicken.
-4. Damit andere mitspielen können: im Reiter **Ports** die Sichtbarkeit von
-   Port 3000 auf **Public** stellen und den Link teilen.
+Dann im Browser `http://localhost:3000` öffnen. Jedes Browserfenster ist ein eigener Spieler.
 
 ## Projektstruktur
 
 ```
-client/index.html   Spiel im Browser: Welt, Figuren, Steuerung, Netzwerk
-server/index.js     Spielserver: liefert den Client aus, WebSocket, Bewegungsprüfung
+client/index.html   Aussehen, Bedienelemente, Anmeldeformular, Spielschleife
+client/world.js     Welt, Landschaft, Figuren und Tiere
+client/net.js       Steuerung, Netzwerk und Anmeldung
+client/combat.js    Kampf, Anzeigen, Werte-Tafel, Effekte
+server/index.js     Spielserver: Anmeldung, Bewegung, Kampf, Tiere, Speichertakt
+server/store.js     Speicher: Konten, Charaktere, Passwörter (scrypt), Datenbank
 ```
-
-## Nächste Schritte
-
-- Gegner in der Testzone, Kampf mit Schadensberechnung auf dem Server
-- Datenbank für Charaktere und Gegenstände
-- Attribut-Training nach dem Prinzip »Learning by Doing«
