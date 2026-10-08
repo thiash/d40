@@ -396,6 +396,10 @@ function get(port, urlPath) {
     ok('Tempo: bis zur Tragkraft voll, darüber langsamer, ab 1,5-fach Stillstand',
       S.loadFactor(40, 40) === 1 && S.loadFactor(45, 40) === 0.83 && S.loadFactor(59.9, 40) > 0.29
       && S.loadFactor(60, 40) === 0);
+    ok('Laufen: Beweglichkeit 10 ist normal, 20 schneller, 40 bleibt bei +20 %',
+      S.moveSpeedBonus({ agi: 10 }) === 1 && Math.abs(S.moveSpeedBonus({ agi: 20 }) - 1.1) < 1e-9
+      && S.moveSpeedBonus({ agi: 40 }) === 1.2 && S.moveSpeedBonus({ agi: 5 }) === 1);
+    ok('Laufen: Der Client erhält das Tempo als mv', f.self.mv === 1);
   });
 
   let loot = null;
@@ -793,6 +797,54 @@ function get(port, urlPath) {
     ok('Massenhaft neue Charaktere werden gebremst', r3.t === 'denied' && r3.code === 'slow');
     S.LIMITS.maxNew = oldNew;
     [c, other, n1, n2].forEach((x) => x.ws.close());
+  });
+
+  await safely('Schmiede, Feuer und Essen', async () => {
+    const reply = (msg, pred) => {
+      const from = a.mark();
+      a.send(msg);
+      return a.waitFor((x) => x.t === 'you' && pred(x), 2000, from);
+    };
+    a.p.x = 50; a.p.z = 50;
+    a.p.inv = { boar_hide: 3, boar_tusk: 2 };
+    let m = await reply({ t: 'craft', r: 'iron_sword' }, (x) => x.note);
+    ok('Schmiede nur aus der Nähe', m.note === 'forgefar' && a.p.inv.boar_hide === 3);
+    a.p.x = S.FORGE.x; a.p.z = S.FORGE.z;
+    m = await reply({ t: 'craft', r: 'iron_sword' }, (x) => x.crafted);
+    ok('Schwert schmieden: Zutaten weg, Schwert in der Tasche',
+      m.crafted.iron_sword === 1 && a.p.inv.iron_sword === 1 && !a.p.inv.boar_hide && !a.p.inv.boar_tusk);
+    m = await reply({ t: 'craft', r: 'longbow' }, (x) => x.note);
+    ok('Ohne Zutaten nichts schmieden', m.note === 'missing' && !a.p.inv.longbow);
+    a.send({ t: 'craft', r: 'constructor' });
+    await sleep(100);
+    ok('Unbekannte Rezepte werden abgewiesen', !Object.prototype.hasOwnProperty.call(a.p.inv, 'constructor'));
+    m = await reply({ t: 'weapon', w: 'iron_sword' }, (x) => x.self && x.self.weapon === 'iron_sword');
+    ok('Geschmiedete Waffe anlegen, solange man sie hat', a.p.weapon === 'iron_sword');
+    a.send({ t: 'weapon', w: 'constructor' });
+    await sleep(100);
+    ok('Unbekannte Waffennamen werden abgewiesen', a.p.weapon === 'iron_sword');
+    await sleep(400);
+    m = await reply({ t: 'drop', k: 'iron_sword' }, (x) => x.dropped);
+    ok('Abgelegt: man kämpft wieder mit der Startwaffe', a.p.weapon === 'heavy' && !a.p.inv.iron_sword);
+    await sleep(400);
+    a.p.inv = { meat: 2 };
+    a.p.x = 50; a.p.z = 50;
+    m = await reply({ t: 'cook', k: 'meat', n: 1 }, (x) => x.note);
+    ok('Grillen nur am Feuer', m.note === 'firefar' && a.p.inv.meat === 2);
+    a.p.x = S.FIRE.x; a.p.z = S.FIRE.z;
+    m = await reply({ t: 'cook', k: 'meat', n: 1 }, (x) => x.cooked);
+    ok('Am Feuer: aus einem rohen wird ein gegrilltes Fleisch',
+      m.cooked.grilled_meat === 1 && a.p.inv.meat === 1 && a.p.inv.grilled_meat === 1);
+    a.p.hp = 20;
+    m = await reply({ t: 'eat', k: 'meat' }, (x) => x.ate);
+    ok('Rohes Fleisch heilt 15', m.heal === 15 && a.p.hp === 35 && !a.p.inv.meat);
+    m = await reply({ t: 'eat', k: 'grilled_meat' }, (x) => x.ate);
+    ok('Gegrilltes Fleisch heilt 30', m.heal === 30 && a.p.hp === 65);
+    a.p.hp = a.p.hpMax;
+    a.p.inv.grilled_meat = 1;
+    m = await reply({ t: 'eat', k: 'grilled_meat' }, (x) => x.note);
+    ok('Voll geheilt: nichts wird verbraucht', m.note === 'full' && a.p.inv.grilled_meat === 1);
+    a.p.inv = {};
   });
 
   await safely('Statusseite', async () => {

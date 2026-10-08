@@ -13,7 +13,7 @@
 //     Server → Client:  auth {token,name,fresh}  denied {code,text}
 //   Im Spiel:
 //     Client → Server:  move {x,z,ry,c}  attack  cast {s}  weapon {w}  ping {ts}  logout
-//                       pick {id}  drop {k,n}  chest {op,k,n}
+//                       pick {id}  drop {k,n}  chest {op,k,n}  craft {r}  cook {k,n}  eat {k}
 //     Server → Client:  welcome join leave state correct pong gear
 //                       spawn despawn attack cast hitE hitP you ko revive
 //                       loot {l}  unloot {id,by}  chest {items}
@@ -67,6 +67,10 @@ const WEAPONS = {
   dagger: { name: 'Dolch', range: COMBAT.reach, base: 3,
             learn: { str: 0.005, agi: 0.005 }, dmg: { str: 0.5, agi: 0.5 } },
   bow:    { name: 'Bogen', range: 18, base: 3, learn: { agi: 0.01 }, dmg: { agi: 1 } },
+  // Geschmiedet: nur mit dem Gegenstand in der Tasche angelegt
+  iron_sword:  { name: 'Eisenschwert', range: COMBAT.reach, base: 6, learn: { str: 0.01 }, dmg: { str: 1.4 }, crafted: true },
+  iron_dagger: { name: 'Eisendolch', range: COMBAT.reach, base: 4.5, learn: { str: 0.005, agi: 0.005 }, dmg: { str: 0.7, agi: 0.7 }, crafted: true },
+  longbow:     { name: 'Langbogen', range: 22, base: 4.5, learn: { agi: 0.01 }, dmg: { agi: 1.4 }, crafted: true },
 };
 const SPELLS = {
   int: { name: 'Intelligenzzauber', range: 14, cost: 5, base: 3, learn: { int: 0.01 }, dmg: { int: 1 } },
@@ -86,7 +90,23 @@ const ITEMS = {
   wolf_fang: { name: 'Wolfszahn', plural: 'Wolfszähne', kg: 0.05 },
   boar_tusk: { name: 'Keilerhauer', plural: 'Keilerhauer', kg: 0.3 },
   meat:      { name: 'Wildfleisch', plural: 'Wildfleisch', kg: 0.5 },
+  grilled_meat: { name: 'Gegrilltes Fleisch', plural: 'Gegrilltes Fleisch', kg: 0.4 },
+  // Geschmiedete Waffen: zugleich Gegenstand (man trägt sie) und Waffenname
+  iron_sword:  { name: 'Eisenschwert', plural: 'Eisenschwerter', kg: 2.5 },
+  iron_dagger: { name: 'Eisendolch', plural: 'Eisendolche', kg: 0.8 },
+  longbow:     { name: 'Langbogen', plural: 'Langbogen', kg: 1.2 },
 };
+// Rezepte: was die Schmiede aus Tasche-Gegenständen macht
+const CRAFT = {
+  iron_sword:  { cost: { boar_hide: 3, boar_tusk: 2 } },
+  iron_dagger: { cost: { wolf_pelt: 2, wolf_fang: 2 } },
+  longbow:     { cost: { hare_pelt: 2, boar_tusk: 1, wolf_fang: 1 } },
+};
+// Nahrung: wie viele Lebenspunkte sie heilt
+const FOOD = { meat: { heal: 15 }, grilled_meat: { heal: 30 } };
+const FORGE = { x: -14, z: -8, reach: 3 };    // Schmiede im Dorf neben dem Startplatz
+const FIRE = { x: 14, z: -8, reach: 3 };      // Lagerfeuer zum Grillen
+const own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
 // Was ein besiegtes Tier fallen lässt: Chance p, Anzahl zwischen n[0] und n[1]
 const DROPS = {
   hare: [{ k: 'hare_pelt', p: 0.8, n: [1, 1] }, { k: 'meat', p: 0.6, n: [1, 1] }],
@@ -110,6 +130,8 @@ const RULES = {                    // geht beim Verbinden an den Client
   spellCooldown: COMBAT.spellCooldown,
   reviveMs: COMBAT.reviveMs,
   weapons: Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, w.name])),
+  craft: Object.fromEntries(Object.entries(CRAFT).map(([k, r]) => [k, r.cost])),
+  food: FOOD, forge: FORGE, fire: FIRE,
   spells: Object.fromEntries(Object.entries(SPELLS).map(([k, s]) => [k, { name: s.name, cost: s.cost }])),
   enemies: Object.fromEntries(Object.entries(ENEMY_KINDS).map(([k, e]) => [k, e.name])),
   items: ITEMS,
@@ -141,6 +163,8 @@ const healShare = (a) => 0.05 + Math.max(0, a.wis - 10) * 0.001;      // Weishei
 const dodgeChance = (a) => clamp((a.agi - 10) * 0.01, 0, COMBAT.dodgeCap);  // Beweglichkeit → Ausweichen
 const attackCooldown = (a) =>                                         // Beweglichkeit → Angriffstempo
   Math.round(Math.max(COMBAT.minCooldown, COMBAT.baseCooldown * clamp(10 / a.agi, 0.5, 1)));
+// Beweglichkeit → Laufgeschwindigkeit: +1 % je Punkt über 10, höchstens +20 % (ab 30)
+const moveSpeedBonus = (a) => clamp(1 + (a.agi - 10) * 0.01, 1, 1.2);
 // Stärke (2/3) und Ausdauer (1/3) → Tragkraft in kg, ohne Obergrenze
 const carryCap = (a) => Math.round(CARRY.perPoint * (a.str * 2 / 3 + a.sta / 3) * 10) / 10;
 const isItem = (k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(ITEMS, k);
@@ -165,6 +189,11 @@ function cleanItems(raw) {
     if (isItem(k) && Number.isInteger(n) && n > 0) out[k] = Math.min(n, LOOT.maxStack);
   }
   return out;
+}
+// Darf man diese Waffe anlegen? Geschmiedete nur, wenn man sie gerade bei sich trägt
+function weaponOk(w, inv) {
+  if (!own(WEAPONS, w)) return false;
+  return !WEAPONS[w].crafted || (inv[w] || 0) > 0;
 }
 function addItems(into, items) {
   for (const k in items) into[k] = Math.min((into[k] || 0) + items[k], LOOT.maxStack);
@@ -276,7 +305,7 @@ function selfView(p) {             // was nur der Spieler selbst über sich erf�
     a: { ...p.a }, weapon: p.weapon, ko: p.ko,
     cd: attackCooldown(p.a), dodge: Math.round(dodgeChance(p.a) * 100),
     heal: Math.round(healShare(p.a) * 1000) / 10,
-    inv: { ...p.inv }, load, cap, spd: loadFactor(load, cap),
+    inv: { ...p.inv }, load, cap, spd: loadFactor(load, cap), mv: moveSpeedBonus(p.a),
   };
 }
 
@@ -344,6 +373,9 @@ function onConnection(ws, req) {
       case 'pick': handlePick(p, msg); break;
       case 'drop': handleDrop(p, msg); break;
       case 'chest': handleChest(p, msg); break;
+      case 'craft': handleCraft(p, msg); break;
+      case 'cook': handleCook(p, msg); break;
+      case 'eat': handleEat(p, msg); break;
     }
   });
   ws.on('close', () => {
@@ -513,7 +545,7 @@ function createPlayer(conn, account, data) {
     a, hpMax, manaMax,
     hp: Number.isFinite(d.hp) ? clamp(Math.round(d.hp), 1, hpMax) : hpMax,
     mana: Number.isFinite(d.mana) ? clamp(d.mana, 0, manaMax) : manaMax,
-    weapon: WEAPONS[d.w] ? d.w : 'heavy', ups: [],
+    weapon: weaponOk(d.w, cleanItems(d.inv)) ? d.w : 'heavy', ups: [],
     inv: cleanItems(d.inv), chest: cleanItems(d.chest), lastDropAt: 0,
     budget: MOVE_BUDGET_CAP, lastMoveAt: now, lastInputAt: now,
     lastAttackAt: 0, lastCastAt: 0, lastFightAt: 0,
@@ -595,7 +627,7 @@ function handleMove(p, msg) {
   const now = Date.now();
   const factor = loadFactor(weightOf(p.inv), carryCap(p.a));
   p.budget = Math.min(MOVE_BUDGET_CAP * factor,
-    p.budget + ((now - p.lastMoveAt) / 1000) * RULES.speed * factor * SPEED_TOLERANCE);
+    p.budget + ((now - p.lastMoveAt) / 1000) * RULES.speed * moveSpeedBonus(p.a) * factor * SPEED_TOLERANCE);
   p.lastMoveAt = now;
 
   const d = Math.hypot(x - p.x, z - p.z);
@@ -612,7 +644,7 @@ function handleMove(p, msg) {
 }
 
 function handleWeapon(p, msg) {
-  if (p.ko || !WEAPONS[msg.w]) return;
+  if (p.ko || !weaponOk(msg.w, p.inv)) return;
   p.weapon = msg.w;
   p.lastInputAt = Date.now();
   broadcast({ t: 'gear', id: p.id, w: p.weapon }, p.id);
@@ -745,7 +777,53 @@ function handleDrop(p, msg) {
   p.lastInputAt = now;
   moveItem(p.inv, null, msg.k, n);
   spawnLoot(p.x, p.z, { [msg.k]: n }, null);   // abgelegt: gehört sofort allen
+  unequipGone(p);
   sendSelf(p, { dropped: { [msg.k]: n } });
+}
+
+// Wer seine geschmiedete Waffe ablegt oder einlagert, kämpft wieder mit der Startwaffe
+function unequipGone(p) {
+  if (!weaponOk(p.weapon, p.inv) && own(WEAPONS, p.weapon) && WEAPONS[p.weapon].crafted) {
+    p.weapon = 'heavy';
+    broadcast({ t: 'gear', id: p.id, w: p.weapon }, p.id);
+  }
+}
+
+// Schmiede: ein Rezept, Zutaten aus der Tasche
+function handleCraft(p, msg) {
+  if (p.ko || !own(CRAFT, msg.r)) return;
+  p.lastInputAt = Date.now();
+  if (dist(p, FORGE) > FORGE.reach) return sendSelf(p, { note: 'forgefar' });
+  const cost = CRAFT[msg.r].cost;
+  for (const k in cost) if ((p.inv[k] || 0) < cost[k]) return sendSelf(p, { note: 'missing' });
+  for (const k in cost) moveItem(p.inv, null, k, cost[k]);
+  addItems(p.inv, { [msg.r]: 1 });
+  p.dirty = true;
+  sendSelf(p, { crafted: { [msg.r]: 1 } });
+}
+
+// Lagerfeuer: rohes Fleisch wird zu gegrilltem (n oder ganzer Stapel)
+function handleCook(p, msg) {
+  if (p.ko || msg.k !== 'meat') return;
+  p.lastInputAt = Date.now();
+  if (dist(p, FIRE) > FIRE.reach) return sendSelf(p, { note: 'firefar' });
+  const n = takeCount(p.inv, msg);
+  if (!n) return;
+  moveItem(p.inv, null, 'meat', n);
+  addItems(p.inv, { grilled_meat: n });
+  sendSelf(p, { cooked: { grilled_meat: n } });
+}
+
+// Essen heilt, überall; rohes Fleisch weniger als gegrilltes
+function handleEat(p, msg) {
+  if (p.ko || !own(FOOD, msg.k) || !p.inv[msg.k]) return;
+  p.lastInputAt = Date.now();
+  if (p.hp >= p.hpMax) return sendSelf(p, { note: 'full' });
+  moveItem(p.inv, null, msg.k, 1);
+  const amount = Math.min(p.hpMax - p.hp, FOOD[msg.k].heal);
+  p.hp += amount;
+  p.dirty = true;
+  sendSelf(p, { ate: msg.k, heal: amount });
 }
 
 // op: open (Inhalt zeigen), store (aus der Tasche hinein), take (heraus in die Tasche)
@@ -758,6 +836,7 @@ function handleChest(p, msg) {
     const n = takeCount(from, msg);
     if (!n) return;
     moveItem(from, to, msg.k, n);
+    if (msg.op === 'store') unequipGone(p);
     sendSelf(p);
   }
   send(p, { t: 'chest', items: { ...p.chest } });
@@ -1114,7 +1193,7 @@ if (require.main === module) {
 // Für die automatischen Tests
 module.exports = {
   start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk,
   carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,
