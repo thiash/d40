@@ -141,6 +141,8 @@ const healShare = (a) => 0.05 + Math.max(0, a.wis - 10) * 0.001;      // Weishei
 const dodgeChance = (a) => clamp((a.agi - 10) * 0.01, 0, COMBAT.dodgeCap);  // Beweglichkeit → Ausweichen
 const attackCooldown = (a) =>                                         // Beweglichkeit → Angriffstempo
   Math.round(Math.max(COMBAT.minCooldown, COMBAT.baseCooldown * clamp(10 / a.agi, 0.5, 1)));
+// Beweglichkeit → Laufgeschwindigkeit: +1 % je Punkt über 10, höchstens +20 % (ab 30)
+const moveSpeedBonus = (a) => clamp(1 + (a.agi - 10) * 0.01, 1, 1.2);
 // Stärke (2/3) und Ausdauer (1/3) → Tragkraft in kg, ohne Obergrenze
 const carryCap = (a) => Math.round(CARRY.perPoint * (a.str * 2 / 3 + a.sta / 3) * 10) / 10;
 const isItem = (k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(ITEMS, k);
@@ -276,7 +278,7 @@ function selfView(p) {             // was nur der Spieler selbst über sich erf�
     a: { ...p.a }, weapon: p.weapon, ko: p.ko,
     cd: attackCooldown(p.a), dodge: Math.round(dodgeChance(p.a) * 100),
     heal: Math.round(healShare(p.a) * 1000) / 10,
-    inv: { ...p.inv }, load, cap, spd: loadFactor(load, cap),
+    inv: { ...p.inv }, load, cap, spd: loadFactor(load, cap), mv: moveSpeedBonus(p.a),
   };
 }
 
@@ -595,7 +597,7 @@ function handleMove(p, msg) {
   const now = Date.now();
   const factor = loadFactor(weightOf(p.inv), carryCap(p.a));
   p.budget = Math.min(MOVE_BUDGET_CAP * factor,
-    p.budget + ((now - p.lastMoveAt) / 1000) * RULES.speed * factor * SPEED_TOLERANCE);
+    p.budget + ((now - p.lastMoveAt) / 1000) * RULES.speed * moveSpeedBonus(p.a) * factor * SPEED_TOLERANCE);
   p.lastMoveAt = now;
 
   const d = Math.hypot(x - p.x, z - p.z);
@@ -1114,7 +1116,7 @@ if (require.main === module) {
 // Für die automatischen Tests
 module.exports = {
   start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus,
   carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,

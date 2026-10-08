@@ -396,6 +396,10 @@ function get(port, urlPath) {
     ok('Tempo: bis zur Tragkraft voll, darüber langsamer, ab 1,5-fach Stillstand',
       S.loadFactor(40, 40) === 1 && S.loadFactor(45, 40) === 0.83 && S.loadFactor(59.9, 40) > 0.29
       && S.loadFactor(60, 40) === 0);
+    ok('Laufen: Beweglichkeit 10 ist normal, 20 schneller, 40 bleibt bei +20 %',
+      S.moveSpeedBonus({ agi: 10 }) === 1 && Math.abs(S.moveSpeedBonus({ agi: 20 }) - 1.1) < 1e-9
+      && S.moveSpeedBonus({ agi: 40 }) === 1.2 && S.moveSpeedBonus({ agi: 5 }) === 1);
+    ok('Laufen: Der Client erhält das Tempo als mv', f.self.mv === 1);
   });
 
   let loot = null;

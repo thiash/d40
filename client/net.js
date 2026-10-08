@@ -472,14 +472,15 @@ function updateMe(dt) {
     const sin = Math.sin(camYaw), cos = Math.cos(camYaw);
     const dx = cos * ix - sin * iy;
     const dz = -sin * ix - cos * iy;
-    // Schwere Last bremst – genau wie der Server rechnet (me.self.spd: 1 frei, 0 überladen)
-    const speed = RULES.speed * (me.self.spd ?? 1);
+    // Beweglichkeit beschleunigt (me.self.mv, höchstens 1,2), schwere Last bremst (me.self.spd)
+    // – genau wie der Server rechnet
+    const speed = RULES.speed * (me.self.mv ?? 1) * (me.self.spd ?? 1);
     const lim = RULES.worldHalf;
     me.x = clamp(me.x + dx * speed * dt, -lim, lim);
     me.z = clamp(me.z + dz * speed * dt, -lim, lim);
     me.ry = Math.atan2(dx, dz);
   }
-  animateCharacter(me.model, me.x, me.z, me.ry, strength * RULES.speed * (me.self.spd ?? 1), dt);
+  animateCharacter(me.model, me.x, me.z, me.ry, strength * RULES.speed * (me.self.mv ?? 1) * (me.self.spd ?? 1), dt);
 }
 
 function updateOthers(dt) {
