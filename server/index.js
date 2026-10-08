@@ -1,12 +1,20 @@
 // D40 – Spielserver
-// Schritt 2: Tiere, Kampf und Lernen durch Tun.
+// Schritt 3: Anmeldung und Speichern (Schritt 2: Tiere, Kampf, Lernen durch Tun).
 // Der Server ist autoritativ: Er prüft jede Bewegung und rechnet Treffer, Schaden,
 // Ausweichen, Heilung, Attributzuwachs und K.O. selbst aus. Der Client zeigt nur an.
+// Wer spielen will, meldet sich mit Name und Passwort an. Charaktere werden alle
+// 30 Sekunden, beim Verlassen und vor einem Neustart des Servers gespeichert.
 //
 // Nachrichten (JSON, das Feld "t" ist der Typ):
-//   Client → Server:  move {x,z,ry,c}  attack  cast {s}  weapon {w}  ping {ts}
-//   Server → Client:  welcome join leave state correct pong gear
-//                     spawn despawn attack cast hitE hitP you ko revive
+//   Vor der Anmeldung:
+//     Server → Client:  hello {persist}
+//     Client → Server:  register {name,pass}  login {name,pass}  resume {token}
+//     Server → Client:  auth {token,name,fresh}  denied {code,text}
+//   Im Spiel:
+//     Client → Server:  move {x,z,ry,c}  attack  cast {s}  weapon {w}  ping {ts}  logout
+//     Server → Client:  welcome join leave state correct pong gear
+//                       spawn despawn attack cast hitE hitP you ko revive
+//                       kicked (woanders angemeldet)  bye (abgemeldet)  notice
 
 'use strict';
 
@@ -14,11 +22,19 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer, WebSocket } = require('ws');
+const {
+  createStore, hashPassword, verifyPassword, newToken, hashToken, checkName, checkPassword,
+} = require('./store');
 
 // ---------------------------------------------------------------------------
 // Einstellungen
 // ---------------------------------------------------------------------------
 const CLIENT_DIR = path.join(__dirname, '..', 'client');
+const SAVE = { everyMs: 30000, flushMs: 8000 };   // Speichertakt; so lange wird vor dem Beenden gewartet
+const LIMITS = {                   // Schutz vor Passwort-Raten und Massen-Anmeldungen, je Internetadresse
+  failWindowMs: 10 * 60 * 1000, maxFails: 8,
+  newWindowMs: 60 * 60 * 1000, maxNew: 6,
+};
 const TICK_RATE = 20;              // Welt-Takte pro Sekunde
 const SPEED_TOLERANCE = 1.25;      // Spielraum für schwankende Verbindungen
 const MOVE_BUDGET_CAP = 3;         // so viele Meter lassen sich höchstens "ansparen"
@@ -112,7 +128,7 @@ const MIME = {
   '.glb': 'model/gltf-binary', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
 };
 
-function serveFile(req, res) {
+function handleHttp(req, res) {
   let pathname;
   try {
     pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
@@ -120,6 +136,28 @@ function serveFile(req, res) {
     res.writeHead(400);
     return res.end('Ungültige Adresse');
   }
+  if (pathname === '/status') return serveStatus(res);
+  serveFile(pathname, res);
+}
+
+// /status zeigt im Browser, ob das Speichern funktioniert – ohne Geheimnisse.
+const STATE_NAMES = { ready: 'bereit', idle: 'noch nicht verbunden', error: 'Fehler' };
+async function serveStatus(res) {
+  let timer;
+  try {
+    await Promise.race([db.init(), new Promise((_, reject) => { timer = setTimeout(reject, 10000); })]);
+  } catch { /* der Fehler steht gleich in status() */ }
+  clearTimeout(timer);
+  const s = db.status();
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({
+    spieler: players.size,
+    speichern: s.persistent ? 'dauerhaft in der Datenbank' : 'nur im Arbeitsspeicher (keine Datenbank eingerichtet)',
+    datenbank: { weg: s.kind, zustand: STATE_NAMES[s.state] || s.state, fehler: s.error || null },
+  }, null, 2));
+}
+
+function serveFile(pathname, res) {
   if (pathname.endsWith('/')) pathname += 'index.html';
 
   // Nur Dateien innerhalb von client/ ausliefern, nie etwas darüber
@@ -144,10 +182,16 @@ function serveFile(req, res) {
 // ---------------------------------------------------------------------------
 // Spielzustand und Versand
 // ---------------------------------------------------------------------------
-const players = new Map();         // id → Spieler
+const players = new Map();         // id → Spieler (nur angemeldete, in der Welt)
 const enemies = new Map();         // id → Tier
+const conns = new Set();           // alle offenen Verbindungen, auch vor der Anmeldung
+const pendingSaves = new Map();    // Konto → letzter Speichervorgang nach dem Verlassen
+const failsByIp = new Map();       // Internetadresse → Zeitpunkte falscher Anmeldungen
+const newByIp = new Map();         // Internetadresse → Zeitpunkte neuer Charaktere
+let db = createStore(process.env.DATABASE_URL);
 let nextId = 1;
 let nextEnemyId = 1;
+let stopping = false;
 
 function publicPlayer(p) {
   return { id: p.id, name: p.name, color: p.color, x: r2(p.x), z: r2(p.z), ry: r2(p.ry),
@@ -165,8 +209,11 @@ function selfView(p) {             // was nur der Spieler selbst über sich erf�
   };
 }
 
+function sendWs(ws, msg) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
 function send(p, msg) {
-  if (p.ws.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify(msg));
+  sendWs(p.ws, msg);
 }
 function broadcast(msg, exceptId) {
   const data = JSON.stringify(msg);
@@ -185,60 +232,277 @@ function log(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Verbindung eines Spielers
+// Verbindung: erst anmelden, dann spielen
 // ---------------------------------------------------------------------------
-function onConnection(ws) {
-  const id = nextId++;
-  const angle = Math.random() * Math.PI * 2;
-  const spawnDist = 2 + Math.random() * 4;
-  const a = freshAttrs();
-  const now = Date.now();
-  const p = {
-    id, ws,
-    name: `Wanderer ${id}`,
-    color: COLORS[(id - 1) % COLORS.length],
-    x: Math.cos(angle) * spawnDist, z: Math.sin(angle) * spawnDist, ry: 0,
-    a, hp: maxHp(a), hpMax: maxHp(a), mana: maxMana(a), manaMax: maxMana(a),
-    weapon: 'heavy', ups: [],
-    budget: MOVE_BUDGET_CAP, lastMoveAt: now, lastInputAt: now,
-    lastAttackAt: 0, lastCastAt: 0, lastFightAt: 0,
-    ko: false, koAt: 0, safeUntil: 0, autoTarget: null,
-    corr: 0, dirty: false, alive: true,
-  };
-  players.set(id, p);
+function clientIp(req) {
+  // Hinter Render steht ein Proxy: Die echte Adresse hängt er hinten an X-Forwarded-For an.
+  const fwd = req && req.headers && req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string') {
+    const parts = fwd.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return (req && req.socket && req.socket.remoteAddress) || '?';
+}
 
-  send(p, {
-    t: 'welcome',
-    you: publicPlayer(p),
-    self: selfView(p),
-    players: [...players.values()].filter((o) => o.id !== id).map(publicPlayer),
-    enemies: [...enemies.values()].map(publicEnemy),
-    rules: RULES,
-  });
-  broadcast({ t: 'join', player: publicPlayer(p) }, id);
-  log(`${p.name} betritt die Welt (${players.size} online)`);
-  maintainEnemies();
+function onConnection(ws, req) {
+  const conn = { ws, ip: clientIp(req), player: null, busy: false, alive: true, closed: false };
+  conns.add(conn);
+  sendWs(ws, { t: 'hello', persist: db.persistent });
 
-  ws.on('pong', () => { p.alive = true; });
+  ws.on('pong', () => { conn.alive = true; });
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
+    const p = conn.player;
+    if (!p) {                      // noch nicht angemeldet: nur Anmeldung und Ping
+      if (msg.t === 'ping' && Number.isFinite(msg.ts)) sendWs(ws, { t: 'pong', ts: msg.ts });
+      else handleAuth(conn, msg);
+      return;
+    }
     switch (msg.t) {
       case 'move': handleMove(p, msg); break;
       case 'attack': handleAttack(p); break;
       case 'cast': handleCast(p, msg); break;
       case 'weapon': handleWeapon(p, msg); break;
       case 'ping': if (Number.isFinite(msg.ts)) send(p, { t: 'pong', ts: msg.ts }); break;
+      case 'logout': handleLogout(p); break;
     }
   });
   ws.on('close', () => {
-    players.delete(id);
-    for (const e of enemies.values()) if (e.target === id) e.target = null;
-    broadcast({ t: 'leave', id });
-    log(`${p.name} verlässt die Welt (${players.size} online)`);
+    conn.closed = true;
+    conns.delete(conn);
+    if (conn.player) leaveWorld(conn.player);
   });
   ws.on('error', () => {});        // Fehler führen ohnehin zu 'close'
+}
+
+// ---------------------------------------------------------------------------
+// Anmeldung: neuer Charakter, Name und Passwort, oder gemerkter Schlüssel
+// ---------------------------------------------------------------------------
+function recent(map, ip, windowMs) {
+  const now = Date.now();
+  const list = (map.get(ip) || []).filter((t) => now - t < windowMs);
+  if (list.length) map.set(ip, list); else map.delete(ip);
+  return list;
+}
+function note(map, ip) {
+  const list = map.get(ip) || [];
+  list.push(Date.now());
+  map.set(ip, list);
+}
+function deny(code, text) {
+  return Object.assign(new Error(text), { deny: true, code });
+}
+
+async function handleAuth(conn, msg) {
+  if (!['register', 'login', 'resume'].includes(msg.t) || conn.busy || stopping) return;
+  if (msg.t !== 'resume' && recent(failsByIp, conn.ip, LIMITS.failWindowMs).length >= LIMITS.maxFails) {
+    return sendWs(conn.ws, { t: 'denied', code: 'slow', text: 'Zu viele Fehlversuche. Warte ein paar Minuten.' });
+  }
+  conn.busy = true;
+  try {
+    let account, token, fresh = false;
+    if (msg.t === 'resume') {
+      if (typeof msg.token !== 'string' || msg.token.length < 20 || msg.token.length > 100) {
+        throw deny('token', 'Bitte melde dich neu an.');
+      }
+      account = await db.findSession(hashToken(msg.token));
+      if (!account) throw deny('token', 'Bitte melde dich neu an.');
+      token = msg.token;
+    } else {
+      const n = checkName(msg.name);
+      if (!n.ok) throw deny('name', n.error);
+      const pw = checkPassword(msg.pass);
+      if (!pw.ok) throw deny('pass', pw.error);
+      let acc = await db.findAccount(n.key);
+      if (msg.t === 'register' && !acc) {
+        if (recent(newByIp, conn.ip, LIMITS.newWindowMs).length >= LIMITS.maxNew) {
+          throw deny('slow', 'Von hier wurden gerade viele Charaktere angelegt. Versuch es später noch einmal.');
+        }
+        const id = await db.createAccount(n.name, n.key, await hashPassword(msg.pass));
+        if (id !== null) {
+          acc = { id, name: n.name };
+          fresh = true;
+          note(newByIp, conn.ip);
+          log(`Neuer Charakter: ${n.name}`);
+        } else {
+          acc = await db.findAccount(n.key);   // im selben Augenblick von jemand anderem vergeben
+        }
+      }
+      if (!acc) {
+        note(failsByIp, conn.ip);
+        throw deny('unknown', `Einen Charakter „${n.name}“ gibt es noch nicht. Tippe auf „Neuen Charakter anlegen“.`);
+      }
+      if (!fresh && !(await verifyPassword(msg.pass, acc.pass))) {
+        note(failsByIp, conn.ip);
+        if (msg.t === 'register') throw deny('taken', `Den Namen „${n.name}“ gibt es schon. Wähle einen anderen.`);
+        throw deny('pass', 'Das Passwort stimmt nicht.');
+      }
+      account = { id: acc.id, name: acc.name };
+      token = newToken();
+      await db.createSession(hashToken(token), account.id);
+      if (db.touchAccount) db.touchAccount(account.id).catch(() => {});
+    }
+    if (!conn.closed && !stopping) await enterWorld(conn, account, token, fresh);
+  } catch (err) {
+    if (err.deny) {
+      sendWs(conn.ws, { t: 'denied', code: err.code, text: err.message });
+    } else {
+      log(`Anmeldung fehlgeschlagen: ${db.describe(err)}`);
+      sendWs(conn.ws, {
+        t: 'denied', code: 'db',
+        text: 'Die Datenbank antwortet gerade nicht. Versuch es gleich noch einmal.',
+        detail: db.status().error,
+      });
+    }
+  } finally {
+    conn.busy = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Welt betreten und verlassen
+// ---------------------------------------------------------------------------
+const onlineAs = (accountId) => [...players.values()].find((q) => q.accountId === accountId);
+
+async function enterWorld(conn, account, token, fresh) {
+  let data = null;
+  if (!onlineAs(account.id)) {
+    await pendingSaves.get(account.id);    // gerade erst gegangen: erst fertig speichern, dann laden
+    data = await db.loadCharacter(account.id);
+  }
+  if (conn.closed || stopping) return;
+
+  // Ist der Charakter noch (oder inzwischen) im Spiel, übernimmt die neue Anmeldung
+  // seinen aktuellen Zustand – der ist frischer als der zuletzt gespeicherte.
+  const old = onlineAs(account.id);
+  if (old) {
+    data = snapshot(old);
+    send(old, { t: 'kicked', text: 'Du hast dich an einem anderen Gerät angemeldet.' });
+    old.conn.player = null;
+    leaveWorld(old, { save: false });
+    old.ws.close(4001, 'elsewhere');
+  }
+
+  const p = createPlayer(conn, account, data);
+  if (old) {
+    p.savedJson = old.savedJson;
+    p.saveChain = old.saveChain;
+  } else if (data) {
+    p.savedJson = JSON.stringify(snapshot(p));
+  }
+  p.tokenHash = hashToken(token);
+  conn.player = p;
+  players.set(p.id, p);
+
+  send(p, { t: 'auth', token, name: p.name, fresh, persist: db.persistent });
+  send(p, {
+    t: 'welcome',
+    you: publicPlayer(p),
+    self: selfView(p),
+    players: [...players.values()].filter((o) => o.id !== p.id).map(publicPlayer),
+    enemies: [...enemies.values()].map(publicEnemy),
+    rules: RULES,
+  });
+  broadcast({ t: 'join', player: publicPlayer(p) }, p.id);
+  log(`${p.name} betritt die Welt (${players.size} online)`);
+  maintainEnemies();
+  if (!p.savedJson) savePlayer(p);           // neuer Charakter: sofort festhalten
+}
+
+// Gespeicherte Werte übernehmen, aber nichts ungeprüft glauben
+function createPlayer(conn, account, data) {
+  const now = Date.now();
+  const d = data && typeof data === 'object' ? data : {};
+  const a = freshAttrs();
+  if (d.a && typeof d.a === 'object') {
+    for (const k in a) if (Number.isFinite(d.a[k])) a[k] = clamp(r3(d.a[k]), 1, 100000);
+  }
+  let x = d.x, z = d.z;
+  const inside = (v) => Number.isFinite(v) && Math.abs(v) <= RULES.worldHalf;
+  if (!inside(x) || !inside(z)) {           // keine gültige Position: am Startplatz erscheinen
+    const angle = Math.random() * Math.PI * 2, spawnDist = 2 + Math.random() * 4;
+    x = Math.cos(angle) * spawnDist;
+    z = Math.sin(angle) * spawnDist;
+  }
+  const hpMax = maxHp(a), manaMax = maxMana(a);
+  const p = {
+    id: nextId++, accountId: account.id, conn, ws: conn.ws,
+    name: account.name,
+    color: COLORS[(account.id - 1) % COLORS.length],
+    x, z, ry: Number.isFinite(d.ry) ? d.ry : 0,
+    a, hpMax, manaMax,
+    hp: Number.isFinite(d.hp) ? clamp(Math.round(d.hp), 1, hpMax) : hpMax,
+    mana: Number.isFinite(d.mana) ? clamp(d.mana, 0, manaMax) : manaMax,
+    weapon: WEAPONS[d.w] ? d.w : 'heavy', ups: [],
+    budget: MOVE_BUDGET_CAP, lastMoveAt: now, lastInputAt: now,
+    lastAttackAt: 0, lastCastAt: 0, lastFightAt: 0,
+    ko: false, koAt: 0, safeUntil: 0, autoTarget: null,
+    corr: 0, dirty: false,
+    savedJson: null, saveChain: Promise.resolve(), tokenHash: null, left: false,
+  };
+  // Bewusstlos abgemeldet: Die Erholung beginnt von vorn – Abmelden ist keine Abkürzung.
+  if (p.hp <= Math.round(hpMax * COMBAT.koShare)) {
+    p.ko = true;
+    p.koAt = now;
+  }
+  return p;
+}
+
+// Was dauerhaft gespeichert wird
+function snapshot(p) {
+  return {
+    v: 1, x: r2(p.x), z: r2(p.z), ry: r2(p.ry),
+    hp: Math.round(p.hp), mana: Math.floor(p.mana), w: p.weapon,
+    a: { str: p.a.str, sta: p.a.sta, agi: p.a.agi, int: p.a.int, wis: p.a.wis },
+  };
+}
+
+// Speichert nur, wenn sich etwas geändert hat – und immer der Reihe nach.
+function savePlayer(p) {
+  p.saveChain = p.saveChain.then(async () => {
+    const data = snapshot(p);
+    const json = JSON.stringify(data);
+    if (json === p.savedJson) return;
+    try {
+      await db.saveCharacter(p.accountId, data);
+      p.savedJson = json;
+    } catch (err) {
+      log(`Speichern von ${p.name} fehlgeschlagen: ${db.describe(err)}`);
+    }
+  });
+  return p.saveChain;
+}
+
+function saveAll() {
+  return Promise.all([...[...players.values()].map(savePlayer), ...pendingSaves.values()]);
+}
+
+function leaveWorld(p, opts = {}) {
+  if (p.left) return;
+  p.left = true;
+  players.delete(p.id);
+  for (const e of enemies.values()) if (e.target === p.id) e.target = null;
+  broadcast({ t: 'leave', id: p.id });
+  log(`${p.name} verlässt die Welt (${players.size} online)`);
+  if (opts.save === false) return;
+  const pr = savePlayer(p);
+  pendingSaves.set(p.accountId, pr);
+  pr.then(() => { if (pendingSaves.get(p.accountId) === pr) pendingSaves.delete(p.accountId); });
+}
+
+// Abmelden: Das Gerät vergisst den Schlüssel, die Verbindung bleibt für eine neue Anmeldung offen.
+async function handleLogout(p) {
+  const conn = p.conn;
+  conn.player = null;
+  leaveWorld(p);
+  try {
+    if (p.tokenHash) await db.deleteSession(p.tokenHash);
+  } catch (err) {
+    log(`Abmelden: Schlüssel nicht gelöscht: ${db.describe(err)}`);
+  }
+  sendWs(conn.ws, { t: 'bye' });
 }
 
 function handleMove(p, msg) {
@@ -577,11 +841,11 @@ function tick() {
   if (pc.length || ec.length) broadcast({ t: 'state', p: pc, e: ec });
 }
 
-function checkAlive() {                    // abgerissene Verbindungen aufräumen
-  for (const p of players.values()) {
-    if (!p.alive) { p.ws.terminate(); continue; }
-    p.alive = false;
-    p.ws.ping();
+function checkAlive() {                    // abgerissene Verbindungen aufräumen, auch vor der Anmeldung
+  for (const c of conns) {
+    if (!c.alive) { c.ws.terminate(); continue; }
+    c.alive = false;
+    c.ws.ping();
   }
 }
 
@@ -592,8 +856,10 @@ let httpServer = null;
 let wss = null;
 let timers = [];
 
-function start(port = Number(process.env.PORT) || 3000) {
-  httpServer = http.createServer(serveFile);
+function start(port = Number(process.env.PORT) || 3000, opts = {}) {
+  if (opts.store) db = opts.store;
+  stopping = false;
+  httpServer = http.createServer(handleHttp);
   wss = new WebSocketServer({ server: httpServer, maxPayload: 4096 });
   wss.on('connection', onConnection);
   wss.on('error', () => {});               // Startfehler meldet listen() unten
@@ -603,24 +869,51 @@ function start(port = Number(process.env.PORT) || 3000) {
     setInterval(regenTick, 1000),
     setInterval(maintainEnemies, 5000),
     setInterval(checkAlive, 30000),
+    setInterval(() => { for (const p of players.values()) savePlayer(p); }, SAVE.everyMs),
   ];
   maintainEnemies();
   return new Promise((resolve, reject) => {
     httpServer.once('error', reject);
     httpServer.listen(port, () => {
       log(`D40-Server läuft: http://localhost:${httpServer.address().port}`);
+      log(db.persistent
+        ? 'Speichern: dauerhaft in der Datenbank (DATABASE_URL)'
+        : 'Speichern: nur im Arbeitsspeicher – ohne DATABASE_URL ist nach einem Neustart alles weg');
       resolve(httpServer.address().port);
     });
   });
 }
 
-function stop() {
+// Beenden: erst alle Spieler speichern, dann die Verbindungen schließen.
+async function stop() {
+  stopping = true;
   timers.forEach(clearInterval);
-  for (const p of players.values()) p.ws.terminate();
+  timers = [];
+  let timer;
+  await Promise.race([
+    Promise.allSettled([saveAll()]),
+    new Promise((resolve) => { timer = setTimeout(resolve, SAVE.flushMs); }),
+  ]);
+  clearTimeout(timer);
+  for (const c of conns) {
+    c.player = null;
+    c.ws.terminate();
+  }
+  conns.clear();
   players.clear();
   enemies.clear();
-  if (wss) wss.close();
-  if (httpServer) httpServer.close();
+  pendingSaves.clear();
+  failsByIp.clear();
+  newByIp.clear();
+  const closing = [];
+  if (wss) closing.push(new Promise((resolve) => wss.close(() => resolve())));
+  if (httpServer) {
+    if (httpServer.closeAllConnections) httpServer.closeAllConnections();
+    closing.push(new Promise((resolve) => httpServer.close(() => resolve())));
+  }
+  wss = null;
+  httpServer = null;
+  await Promise.all(closing);
 }
 
 if (require.main === module) {
@@ -629,10 +922,23 @@ if (require.main === module) {
     else console.error(err);
     process.exit(1);
   });
+  // Render beendet den Server bei jedem neuen Deploy mit SIGTERM: vorher alles speichern.
+  let quitting = false;
+  const quit = (signal) => {
+    if (quitting) return;
+    quitting = true;
+    log(`${signal} erhalten: speichere alle Spieler und beende den Server …`);
+    broadcast({ t: 'notice', text: 'Der Server startet neu. Dein Fortschritt ist gespeichert.' });
+    stop().then(() => process.exit(0), () => process.exit(1));
+  };
+  process.on('SIGTERM', () => quit('SIGTERM'));
+  process.on('SIGINT', () => quit('SIGINT'));
 }
 
 // Für die automatischen Tests
 module.exports = {
-  start, stop, players, enemies, spawnEnemy, COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS,
+  start, stop, saveAll, players, enemies, conns, spawnEnemy, snapshot,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
+  getStore: () => db,
 };
