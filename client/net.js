@@ -145,6 +145,9 @@ canvas.addEventListener('wheel', (e) => {
 
 // Tasten am PC – die Kampf-Funktionen stehen in combat.js
 window.addEventListener('keydown', (e) => {
+  // Beim Tippen in ein Feld oder während der Anmeldung steuert die Tastatur nicht das Spiel
+  if (document.body.classList.contains('login-open')) return;
+  if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   keys.add(e.code);
   if (e.code === 'Space') e.preventDefault();
   if (e.repeat) return;
@@ -164,6 +167,8 @@ const net = {
   ws: null, retry: 0, corr: 0, ping: null,
   sendTimer: 0, pingTimer: 0,
   sent: { x: Infinity, z: Infinity, ry: Infinity },
+  persist: true,                    // speichert der Server dauerhaft?
+  kicked: false,                    // an einem anderen Gerät angemeldet: nicht von selbst zurückholen
 };
 
 const isOnline = () => net.ws !== null && net.ws.readyState === WebSocket.OPEN && me.id !== null;
@@ -192,11 +197,13 @@ function connect() {
     if (net.ws !== ws) return;
     const wasOnline = me.id !== null;
     net.ws = null;
-    me.id = null;
     net.ping = null;
-    clearOthers();
-    clearCreatures();
-    resetCombat();
+    leaveGame();
+    if (net.kicked) {               // woanders angemeldet: erst auf Wunsch zurück
+      setStatus('offline', 'Abgemeldet');
+      return;
+    }
+    login.setBusy(false);
     const wait = Math.min(1000 * 2 ** net.retry, 10000);
     net.retry++;
     setStatus('offline', `Getrennt, neuer Versuch in ${Math.round(wait / 1000)} s`);
@@ -206,7 +213,144 @@ function connect() {
   });
 }
 
+// Spielwelt verlassen (Abmelden, woanders angemeldet, Verbindung weg)
+function leaveGame() {
+  me.id = null;
+  clearOthers();
+  clearCreatures();
+  resetCombat();
+}
+
+// ===========================================================================
+//  Anmeldung: Name und Passwort, danach merkt sich das Gerät einen Schlüssel
+// ===========================================================================
+const savedLogin = {                // im Browser gespeicherter Anmelde-Schlüssel (nie das Passwort)
+  key: 'd40.token',
+  get() { try { return localStorage.getItem(this.key); } catch { return null; } },
+  set(t) { try { localStorage.setItem(this.key, t); } catch { /* privates Fenster: dann eben ohne */ } },
+  clear() { try { localStorage.removeItem(this.key); } catch { /* egal */ } },
+};
+
+const login = {
+  box: document.getElementById('login'),
+  form: document.getElementById('login-form'),
+  name: document.getElementById('login-name'),
+  pass: document.getElementById('login-pass'),
+  error: document.getElementById('login-error'),
+  go: document.getElementById('login-go'),
+  fresh: document.getElementById('login-new'),
+  resume: document.getElementById('login-resume'),
+  warn: document.getElementById('login-warn'),
+  busy: false,
+
+  show(text = '', opts = {}) {
+    this.box.hidden = false;
+    document.body.classList.add('login-open');
+    this.error.textContent = text;
+    this.error.classList.toggle('info', !!opts.info);
+    this.resume.hidden = !opts.resume;
+    this.warn.hidden = net.persist;
+    this.setBusy(false);
+    setStatus(isOnline() ? 'online' : (net.ws ? 'connecting' : 'offline'), net.kicked ? 'Abgemeldet' : 'Anmeldung');
+    // Am PC gleich ins Feld springen; am Handy nicht, sonst klappt sofort die Tastatur auf
+    if (window.matchMedia && window.matchMedia('(pointer: fine)').matches && this.name.focus) {
+      (this.name.value ? this.pass : this.name).focus();
+    }
+  },
+  hide() {
+    this.box.hidden = true;
+    document.body.classList.remove('login-open');
+    this.pass.value = '';
+    this.error.textContent = '';
+  },
+  setBusy(on) {
+    this.busy = on;
+    this.go.disabled = this.fresh.disabled = on;
+    this.go.textContent = on ? 'Einen Moment …' : 'Anmelden';
+  },
+  submit(kind) {
+    if (this.busy) return;
+    const name = this.name.value.trim();
+    const pass = this.pass.value;
+    if (!name) return this.show('Bitte gib einen Namen ein.');
+    if (!pass) return this.show('Bitte gib ein Passwort ein.');
+    if (!net.ws || net.ws.readyState !== WebSocket.OPEN) {
+      if (net.kicked) return resumeHere();          // nach "woanders angemeldet": einfach neu verbinden
+      return this.show('Keine Verbindung zum Server. Es wird gleich neu versucht.');
+    }
+    this.error.textContent = '';
+    this.setBusy(true);
+    sendMsg({ t: kind, name, pass });
+  },
+};
+
+login.form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const kind = e.submitter && e.submitter.value === 'register' ? 'register' : 'login';
+  login.submit(kind);
+});
+function resumeHere() {             // nach "woanders angemeldet" hier zurückholen
+  net.kicked = false;
+  login.hide();
+  net.retry = 0;
+  connect();
+}
+login.resume.addEventListener('click', resumeHere);
+
+function onAuthMessage(msg) {
+  switch (msg.t) {
+    case 'hello': {                 // neue Verbindung: gemerkte Anmeldung nutzen oder Formular zeigen
+      net.persist = msg.persist !== false;
+      const token = savedLogin.get();
+      if (token) {
+        setStatus('connecting', 'Melde an …');
+        login.setBusy(true);
+        sendMsg({ t: 'resume', token });
+      } else {
+        login.show(login.error.textContent);
+      }
+      return true;
+    }
+    case 'auth':
+      savedLogin.set(msg.token);
+      login.hide();
+      if (msg.fresh) log('Dein Charakter ist angelegt. Viel Glück in Althea!');
+      if (!msg.persist) log('Achtung: Der Server speichert gerade nicht dauerhaft.');
+      return true;
+    case 'denied':
+      if (msg.code === 'token') {   // gemerkte Anmeldung ungültig: neu anmelden
+        savedLogin.clear();
+        login.show('');
+      } else {
+        login.show(msg.text || 'Die Anmeldung hat nicht geklappt.');
+      }
+      return true;
+    case 'kicked':
+      net.kicked = true;
+      leaveGame();
+      login.show(msg.text, { resume: true });
+      return true;
+    case 'bye':                     // abgemeldet: Gerät vergisst den Schlüssel
+      savedLogin.clear();
+      leaveGame();
+      login.show('Du hast dich abgemeldet.', { info: true });
+      return true;
+    case 'notice':
+      log(msg.text);
+      return true;
+  }
+  return false;
+}
+
+function logout() {
+  if (!isOnline()) return;
+  hud.stats.hidden = true;
+  hud.statsBtn.setAttribute('aria-expanded', 'false');
+  sendMsg({ t: 'logout' });
+}
+
 function onMessage(msg) {
+  if (onAuthMessage(msg)) return;
   switch (msg.t) {
     case 'welcome': {
       Object.assign(RULES, msg.rules);
