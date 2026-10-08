@@ -810,9 +810,24 @@ function get(port, urlPath) {
     let m = await reply({ t: 'craft', r: 'iron_sword' }, (x) => x.note);
     ok('Schmiede nur aus der Nähe', m.note === 'forgefar' && a.p.inv.boar_hide === 3);
     a.p.x = S.FORGE.x; a.p.z = S.FORGE.z;
-    m = await reply({ t: 'craft', r: 'iron_sword' }, (x) => x.crafted);
-    ok('Schwert schmieden: Zutaten weg, Schwert in der Tasche',
-      m.crafted.iron_sword === 1 && a.p.inv.iron_sword === 1 && !a.p.inv.boar_hide && !a.p.inv.boar_tusk);
+    const oldMs = S.CRAFTING.ms;
+    S.CRAFTING.ms = 300;
+    m = await reply({ t: 'craft', r: 'iron_sword' }, (x) => x.crafting);
+    ok('Schmieden beginnt und dauert: Zutaten bleiben bis zum Ende in der Tasche',
+      m.crafting.r === 'iron_sword' && m.crafting.ms === 300 && a.p.inv.boar_hide === 3 && !a.p.inv.iron_sword);
+    m = await reply({ t: 'craft', r: 'iron_sword' }, (x) => x.note);
+    ok('Während des Schmiedens kein zweites Mal', m.note === 'busy');
+    a.p.x = S.FORGE.x + 10;
+    m = await a.waitFor((x) => x.t === 'you' && x.craftStop, 2000);
+    ok('Weggehen bricht das Schmieden ab, nichts geht verloren',
+      m.craftStop === 'iron_sword' && a.p.inv.boar_hide === 3 && a.p.inv.boar_tusk === 2 && !a.p.inv.iron_sword && !a.p.crafting);
+    a.p.x = S.FORGE.x;
+    const t0 = Date.now();
+    await reply({ t: 'craft', r: 'iron_sword' }, (x) => x.crafting);
+    m = await a.waitFor((x) => x.t === 'you' && x.crafted, 2000);
+    ok('Nach der Wartezeit: Zutaten weg, Schwert in der Tasche',
+      m.crafted.iron_sword === 1 && a.p.inv.iron_sword === 1 && !a.p.inv.boar_hide && !a.p.inv.boar_tusk && Date.now() - t0 >= 250);
+    S.CRAFTING.ms = oldMs;
     m = await reply({ t: 'craft', r: 'longbow' }, (x) => x.note);
     ok('Ohne Zutaten nichts schmieden', m.note === 'missing' && !a.p.inv.longbow);
     a.send({ t: 'craft', r: 'constructor' });

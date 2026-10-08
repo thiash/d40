@@ -353,6 +353,16 @@ function makeEl(id, hidden = false) {
   await until(() => el('craft').hidden === false);
   ok('Schmiede-Menü: drei Rezepte, Titel „Schmiede“', el('craft-title').textContent === 'Schmiede'
     && el('craft-list').children.length === Object.keys(ev('RULES.craft')).length && el('craft-list').children.length === 3);
+  const oldCraftMs = S.CRAFTING.ms;
+  S.CRAFTING.ms = 300;
+  P().inv = { ...P().inv, boar_hide: 3, boar_tusk: 2 };
+  ev("sendMsg({ t: 'craft', r: 'iron_sword' })");
+  await until(() => el('craft-progress').hidden === false);
+  ok('Schmieden: Fortschrittsbalken erscheint, Knöpfe gesperrt', ev("__logs.some((l) => l.startsWith('Du schmiedest '))")
+    && el('craft-list').children[0].children[2].disabled === true);
+  await until(() => el('craft-progress').hidden === true);
+  ok('Fertig: Balken weg, Schwert in der Tasche', ev('me.self.inv.iron_sword') === 1 && ev("__logs.some((l) => l.startsWith('Fertig!'))"));
+  S.CRAFTING.ms = oldCraftMs;
   el('craft-close').dispatch('click');
   ok('Schmiede-Menü schließt sich', el('craft').hidden === true && el('use-label').textContent === 'Schmieden');
   teleport(14, -8);

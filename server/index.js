@@ -105,6 +105,7 @@ const CRAFT = {
 // Nahrung: wie viele Lebenspunkte sie heilt
 const FOOD = { meat: { heal: 15 }, grilled_meat: { heal: 30 } };
 const FORGE = { x: -14, z: -8, reach: 3 };    // Schmiede im Dorf neben dem Startplatz
+const CRAFTING = { ms: 3000 };                // so lange dauert das Schmieden einer Waffe
 const FIRE = { x: 14, z: -8, reach: 3 };      // Lagerfeuer zum Grillen
 // Gebäude sind feste Hindernisse – dieselbe Liste wie im Client (world.js)
 const BUILDINGS = [
@@ -140,7 +141,7 @@ const RULES = {                    // geht beim Verbinden an den Client
   reviveMs: COMBAT.reviveMs,
   weapons: Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, w.name])),
   craft: Object.fromEntries(Object.entries(CRAFT).map(([k, r]) => [k, r.cost])),
-  food: FOOD, forge: FORGE, fire: FIRE, buildings: BUILDINGS,
+  food: FOOD, forge: FORGE, fire: FIRE, buildings: BUILDINGS, craftMs: CRAFTING.ms,
   spells: Object.fromEntries(Object.entries(SPELLS).map(([k, s]) => [k, { name: s.name, cost: s.cost }])),
   enemies: Object.fromEntries(Object.entries(ENEMY_KINDS).map(([k, e]) => [k, e.name])),
   items: ITEMS,
@@ -665,7 +666,7 @@ function createPlayer(conn, account, data) {
   const p = {
     id: nextId++, accountId: account.id, conn, ws: conn.ws,
     name: account.name,
-    look: normLook(d.look !== undefined ? d.look : account.look), lastLookAt: 0,
+    look: normLook(d.look !== undefined ? d.look : account.look), lastLookAt: 0, crafting: null,
     color: COLORS[(account.id - 1) % COLORS.length],
     x, z, ry: Number.isFinite(d.ry) ? d.ry : 0,
     a, hpMax, manaMax,
@@ -917,16 +918,38 @@ function unequipGone(p) {
 }
 
 // Schmiede: ein Rezept, Zutaten aus der Tasche
+// Schmieden dauert ein paar Sekunden. Die Zutaten gehen erst am Ende weg –
+// wer vorher weggeht, umfällt oder sich abmeldet, verliert nichts.
+function hasCost(p, r) {
+  const cost = CRAFT[r].cost;
+  for (const k in cost) if ((p.inv[k] || 0) < cost[k]) return false;
+  return true;
+}
 function handleCraft(p, msg) {
   if (p.ko || !own(CRAFT, msg.r)) return;
-  p.lastInputAt = Date.now();
+  const now = Date.now();
+  p.lastInputAt = now;
+  if (p.crafting) return sendSelf(p, { note: 'busy' });
   if (dist(p, FORGE) > FORGE.reach) return sendSelf(p, { note: 'forgefar' });
-  const cost = CRAFT[msg.r].cost;
-  for (const k in cost) if ((p.inv[k] || 0) < cost[k]) return sendSelf(p, { note: 'missing' });
+  if (!hasCost(p, msg.r)) return sendSelf(p, { note: 'missing' });
+  p.crafting = { r: msg.r, until: now + CRAFTING.ms };
+  sendSelf(p, { crafting: { r: msg.r, ms: CRAFTING.ms } });
+}
+function stepCraft(p, now) {
+  const c = p.crafting;
+  if (!c) return;
+  if (p.ko || dist(p, FORGE) > FORGE.reach) {
+    p.crafting = null;
+    return sendSelf(p, { craftStop: c.r });
+  }
+  if (now < c.until) return;
+  p.crafting = null;
+  if (!hasCost(p, c.r)) return sendSelf(p, { craftStop: c.r, note: 'missing' });   // inzwischen abgelegt
+  const cost = CRAFT[c.r].cost;
   for (const k in cost) moveItem(p.inv, null, k, cost[k]);
-  addItems(p.inv, { [msg.r]: 1 });
+  addItems(p.inv, { [c.r]: 1 });
   p.dirty = true;
-  sendSelf(p, { crafted: { [msg.r]: 1 } });
+  sendSelf(p, { crafted: { [c.r]: 1 } });
 }
 
 // Lagerfeuer: rohes Fleisch wird zu gegrilltem (n oder ganzer Stapel)
@@ -1178,6 +1201,7 @@ function stepEnemies(dt, now) {
 // Spieler im Takt: Erholung nach K.O. und automatischer Gegenangriff
 // ---------------------------------------------------------------------------
 function stepPlayer(p, now) {
+  stepCraft(p, now);
   if (p.ko) {
     if (now - p.koAt >= COMBAT.reviveMs) revive(p, now);
     return;
@@ -1332,7 +1356,7 @@ if (require.main === module) {
 // Für die automatischen Tests
 module.exports = {
   start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, normLook, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding, isEnvAdmin,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, normLook, moveSpeedBonus, CRAFT, CRAFTING, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding, isEnvAdmin,
   carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,
