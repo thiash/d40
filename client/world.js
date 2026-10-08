@@ -1,7 +1,7 @@
 'use strict';
 // ===========================================================================
-//  D40 – Client, Teil 1 von 3: Grundgerüst, Welt, Figuren und Tiere
-//  Reihenfolge der Dateien: world.js → net.js → combat.js (siehe index.html)
+//  D40 – Client, Teil 1 von 4: Grundgerüst, Welt, Figuren, Tiere, Beute und Truhe
+//  Reihenfolge der Dateien: world.js → net.js → combat.js → items.js (siehe index.html)
 // ===========================================================================
 
 // ---- Regeln (der Server schickt beim Verbinden seine eigenen Werte) ----
@@ -10,6 +10,7 @@ const RULES = {
   weapons: { heavy: 'Schwert', dagger: 'Dolch', bow: 'Bogen' },
   spells: { int: { name: 'Intelligenzzauber', cost: 5 }, wis: { name: 'Weisheitszauber', cost: 6 } },
   enemies: { hare: 'Hase', wolf: 'Wolf', boar: 'Keiler' },
+  items: {}, lootReach: 2.6, chest: { x: 0, z: 0, reach: 3 },
 };
 const WATER_LEVEL = -3.2;
 const SEND_RATE = 15;               // Bewegungs-Updates pro Sekunde an den Server
@@ -538,4 +539,69 @@ function disposeEnemy(model) {
   scene.remove(model);
   model.userData.bar.material.map.dispose();
   model.userData.bar.material.dispose();
+}
+
+// ===========================================================================
+//  Gegenstände in der Welt: Beutesäcke am Boden und die Truhe am Startplatz
+// ===========================================================================
+const ITEM_GEO = {
+  sack:  flat(new THREE.IcosahedronGeometry(0.26, 0).scale(1, 0.8, 1).translate(0, 0.2, 0)),
+  neck:  flat(new THREE.CylinderGeometry(0.06, 0.1, 0.12, 5).translate(0, 0.43, 0)),
+  tie:   flat(new THREE.TorusGeometry(0.07, 0.025, 3, 6).rotateX(Math.PI / 2).translate(0, 0.4, 0)),
+  chest: box(1.1, 0.55, 0.7).translate(0, 0.28, 0),
+  lid:   box(1.14, 0.22, 0.74).translate(0, 0.66, 0),
+  band:  box(0.08, 0.8, 0.76).translate(0, 0.4, 0),
+  lock:  box(0.16, 0.18, 0.06).translate(0, 0.5, 0.38),
+};
+const ITEM_MATS = {
+  sack:  new THREE.MeshLambertMaterial({ color: 0xa8865a }),
+  neck:  new THREE.MeshLambertMaterial({ color: 0x8e6f48 }),
+  free:  new THREE.MeshLambertMaterial({ color: 0xd9b24a, emissive: 0x4a3a10 }),   // darf man nehmen
+  held:  new THREE.MeshLambertMaterial({ color: 0x7d7a74 }),                       // gehört noch jemand anderem
+  wood:  new THREE.MeshLambertMaterial({ color: 0x6e4a2c }),
+  brass: new THREE.MeshLambertMaterial({ color: 0xc9a24a }),
+};
+
+function makeLoot() {
+  const root = new THREE.Group();
+  root.add(new THREE.Mesh(ITEM_GEO.sack, ITEM_MATS.sack));
+  root.add(new THREE.Mesh(ITEM_GEO.neck, ITEM_MATS.neck));
+  const tie = new THREE.Mesh(ITEM_GEO.tie, ITEM_MATS.held);
+  root.add(tie);
+  root.userData = { tie, t: Math.random() * 6 };
+  scene.add(root);
+  return root;
+}
+
+function setLootFree(model, free) {         // goldene Schnur: darf ich nehmen
+  model.userData.tie.material = free ? ITEM_MATS.free : ITEM_MATS.held;
+}
+
+function animateLoot(model, x, z, dt) {     // sanftes Wippen, damit man Beute im Gras sieht
+  const u = model.userData;
+  u.t += dt * 2.2;
+  model.position.set(x, groundY(x, z) + 0.03 + Math.max(0, Math.sin(u.t)) * 0.06, z);
+  model.rotation.y = u.t * 0.25;
+}
+
+function disposeLoot(model) {
+  scene.remove(model);
+}
+
+function makeChest(x, z) {
+  const root = new THREE.Group();
+  const add = (geo, mat, dx = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.x = dx;
+    root.add(m);
+  };
+  add(ITEM_GEO.chest, ITEM_MATS.wood);
+  add(ITEM_GEO.lid, ITEM_MATS.wood);
+  add(ITEM_GEO.band, ITEM_MATS.brass, -0.38);
+  add(ITEM_GEO.band, ITEM_MATS.brass, 0.38);
+  add(ITEM_GEO.lock, ITEM_MATS.brass);
+  root.position.set(x, groundY(x, z) - 0.02, z);
+  root.rotation.y = 0.35;
+  scene.add(root);
+  return root;
 }

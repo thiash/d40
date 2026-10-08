@@ -114,6 +114,7 @@ function makeEl(id, hidden = false) {
   ev('var __logs = []; { const orig = log; log = function (t) { __logs.push(t); orig(t); }; }');
   run('net.js');
   run('combat.js');
+  run('items.js');
   vm.runInContext(inline, ctx, { filename: 'index.html' });
 
   async function pump(ms) {
@@ -242,6 +243,104 @@ function makeEl(id, hidden = false) {
   ok('Wieder auf den Beinen', ev('me.ko') === false && el('ko').hidden === true);
   S.enemies.clear();
   P().autoTarget = null;
+
+  // ---- Schritt 4: Beute, Tasche, Last, Truhe ----
+  const teleport = (x, z) => { P().x = x; P().z = z; ev(`me.x = ${x}; me.z = ${z}`); };
+  const nudge = () => ev("sendMsg({ t: 'chest', op: 'open' })");   // weit weg: Server schickt die eigenen Werte
+  const findBtn = (list, op, k) => {
+    for (const row of el(list).children) for (const c of row.children || []) {
+      if (c.dataset && c.dataset.op === op && c.dataset.k === k) return c;
+    }
+    return null;
+  };
+  teleport(15, 15);
+  S.enemies.clear();
+  for (const id of [...S.loots.keys()]) S.removeLoot(id, 0);   // Beute aus den Kämpfen weiter oben
+  await pump(200);
+  ok('Last-Anzeige unter Leben und Mana', el('load-text').textContent === '0,0 / 40' && el('load-bar').style.width === '0%');
+  const pile = S.spawnLoot(15.8, 15, { wolf_pelt: 1, wolf_fang: 2 }, P().accountId);
+  await until(() => ev(`lootPiles.has(${pile.id})`));
+  await pump(100);
+  ok('Beute erscheint als Sack, der Knopf zeigt „Aufheben“', ev(`lootPiles.get(${pile.id}).free`) === true
+    && el('use').hidden === false && el('use-label').textContent === 'Aufheben');
+  el('use').dispatch('pointerdown');
+  await until(() => !ev(`lootPiles.has(${pile.id})`));
+  await pump(100);
+  ok('Aufgehoben: Meldung, Sack weg, Knopf weg', logged('Du hebst 1 Wolfsfell und 2 Wolfszähne auf.')
+    && el('use').hidden === true);
+  ok('Last steigt', el('load-text').textContent === '1,6 / 40' && el('load-bar').style.width === '4%');
+
+  el('stats-btn').dispatch('click');
+  el('bag-btn').dispatch('click');
+  ok('Tasche öffnet sich, Werte-Tafel geht zu', el('bag').hidden === false && el('stats').hidden === true
+    && el('bag-btn').attrs['aria-expanded'] === 'true');
+  ok('Tasche zeigt Last und Inhalt', el('bag-load').textContent === `Last 1,6 / ${ev('fmtKg(me.self.cap)')} kg`
+    && !!findBtn('bag-list', 'drop', 'wolf_pelt') && !!findBtn('bag-list', 'drop', 'wolf_fang'),
+    `${el('bag-load').textContent} | ${el('bag-list').children.length} Zeilen | ${JSON.stringify(el('bag-list').children.map((r) => (r.children || []).map((c) => c.textContent)))}`);
+  findBtn('bag-list', 'drop', 'wolf_fang').dispatch('click');
+  await until(() => logged('Du legst 2 Wolfszähne ab.'));
+  await pump(100);
+  ok('Ablegen: Meldung, Gegenstand verschwindet aus der Tasche', logged('Du legst 2 Wolfszähne ab.')
+    && !findBtn('bag-list', 'drop', 'wolf_fang') && ev('me.self.inv.wolf_fang') === undefined);
+  ok('Abgelegtes liegt vor einem und lässt sich wieder aufheben', ev('lootPiles.size') === 1
+    && el('use').hidden === false, `piles ${ev('lootPiles.size')} use.hidden ${el('use').hidden} me ${ev('me.x')},${ev('me.z')} srv ${P().x},${P().z} piles ${JSON.stringify([...S.loots.values()].map((l) => [l.x, l.z]))}`);
+  await pump(400);                         // Doppeltipp-Sperre abwarten
+  key('KeyF');
+  await until(() => ev('me.self.inv.wolf_fang') === 2);
+  ok('Taste F hebt auf', ev('me.self.inv.wolf_fang') === 2 && ev('lootPiles.size') === 0);
+  key('KeyI');
+  ok('Taste I schließt die Tasche', el('bag').hidden === true);
+
+  const foreign = S.spawnLoot(15.5, 15, { meat: 1 }, 987654);
+  await until(() => ev(`lootPiles.has(${foreign.id})`));
+  await pump(100);
+  ok('Fremde reservierte Beute: kein Knopf', ev(`lootPiles.get(${foreign.id}).free`) === false && el('use').hidden === true,
+    `free ${ev(`lootPiles.get(${foreign.id}).free`)} use ${el('use').hidden} ${el('use-label').textContent} piles ${ev('lootPiles.size')}`);
+  S.loots.delete(foreign.id);
+  ev(`removePile(${foreign.id})`);
+
+  P().inv = { boar_hide: 15 };
+  nudge();
+  await until(() => ev('me.self.spd') === 0.83);
+  ok('Zu schwer: langsamer, Meldung, Balken färbt sich', logged('Du trägst schwer und wirst langsamer.')
+    && el('load-bar').classList.contains('over') && el('load-text').textContent === '45,0 / 40');
+  P().inv = { boar_hide: 25 };             // 75 kg: weit über dem Anderthalbfachen
+  nudge();
+  await until(() => ev('me.self.spd') === 0);
+  const sx = ev('me.x'), sz = ev('me.z');
+  ev("keys.add('KeyW')");
+  await pump(300);
+  ev("keys.delete('KeyW')");
+  ok('Überladen: man kommt nicht vom Fleck', ev('me.x') === sx && ev('me.z') === sz
+    && logged('Du trägst zu viel und kommst nicht mehr vom Fleck. Leg etwas ab.'), `${sx},${sz} -> ${ev('me.x')},${ev('me.z')} ${JSON.stringify(ev('__logs').slice(-5))}`);
+  P().inv = { meat: 2 };
+  nudge();
+  await until(() => ev('me.self.spd') === 1);
+  ok('Wieder leicht: Meldung', logged('Deine Last ist wieder gut zu tragen.'));
+  ev("keys.add('KeyW')");
+  await pump(200);
+  ev("keys.delete('KeyW')");
+  ok('Und man läuft wieder', Math.hypot(ev('me.x') - sx, ev('me.z') - sz) > 0.5);
+
+  teleport(1, 0.5);
+  await pump(150);
+  ok('An der Truhe: Knopf „Truhe öffnen“', el('use').hidden === false && el('use-label').textContent === 'Truhe öffnen');
+  el('use').dispatch('pointerdown');
+  await until(() => el('chest').hidden === false);
+  ok('Truhe öffnet sich, anfangs leer', el('chest').hidden === false && el('chest-list').children.length === 1
+    && el('chest-list').children[0].textContent === 'Die Truhe ist leer.' && !!findBtn('chest-bag', 'store', 'meat'));
+  findBtn('chest-bag', 'store', 'meat').dispatch('click');
+  await until(() => !!findBtn('chest-list', 'take', 'meat'));
+  ok('Einlagern: Fleisch wandert in die Truhe', !!findBtn('chest-list', 'take', 'meat') && P().chest.meat === 2
+    && ev('me.self.inv.meat') === undefined);
+  findBtn('chest-list', 'take', 'meat').dispatch('click');
+  await until(() => ev('me.self.inv.meat') === 2);
+  ok('Nehmen: zurück in die Tasche', ev('me.self.inv.meat') === 2 && !P().chest.meat);
+  ok('Knopf heißt jetzt „Truhe schließen“', el('use-label').textContent === 'Truhe schließen');
+  teleport(15, 15);
+  await pump(150);
+  ok('Weggehen schließt die Truhe', el('chest').hidden === true && el('use').hidden === true,
+    `chest ${el('chest').hidden} use ${el('use').hidden} ${el('use-label').textContent} me ${ev('me.x')},${ev('me.z')} piles ${ev('lootPiles.size')}`);
 
   // ---- Abmelden ----
   const before = { ...P().a };

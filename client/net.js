@@ -1,6 +1,6 @@
 'use strict';
 // ===========================================================================
-//  D40 – Client, Teil 2 von 3: Spielzustand, Steuerung und Netzwerk
+//  D40 – Client, Teil 2 von 4: Spielzustand, Steuerung, Netzwerk und Anmeldung
 // ===========================================================================
 
 // ---- Spielzustand ----
@@ -10,6 +10,7 @@ const me = {
   self: {
     hp: 100, hpMax: 100, mana: 60, manaMax: 60, weapon: 'heavy', ko: false,
     a: { str: 10, sta: 10, agi: 10, int: 10, wis: 10 }, cd: 900, dodge: 0, heal: 5,
+    inv: {}, load: 0, cap: 40, spd: 1,
   },
 };
 const others = new Map();           // id → { name, model, x, z, tx, tz, ry }
@@ -156,6 +157,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.code === 'KeyE') castSpell('int');
   else if (e.code === 'KeyR') castSpell('wis');
   else if (e.code === 'KeyC') toggleStats();
+  else if (e.code === 'KeyF') useNearest();
+  else if (e.code === 'KeyI') toggleBag();
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
@@ -219,6 +222,7 @@ function leaveGame() {
   clearOthers();
   clearCreatures();
   resetCombat();
+  resetItems();
 }
 
 // ===========================================================================
@@ -350,7 +354,7 @@ function logout() {
 }
 
 function onMessage(msg) {
-  if (onAuthMessage(msg)) return;
+  if (onAuthMessage(msg) || onItemMessage(msg)) return;
   switch (msg.t) {
     case 'welcome': {
       Object.assign(RULES, msg.rules);
@@ -368,6 +372,10 @@ function onMessage(msg) {
       msg.players.forEach(addOther);
       clearCreatures();
       msg.enemies.forEach(addCreature);
+      clearPiles();
+      (msg.loots || []).forEach(addPile);
+      chestModel.position.set(RULES.chest.x, groundY(RULES.chest.x, RULES.chest.z) - 0.02, RULES.chest.z);
+      itemState.spd = msg.self.spd ?? 1;
       refreshHud();
       log(`Willkommen, ${you.name}.`);
       break;
@@ -464,12 +472,14 @@ function updateMe(dt) {
     const sin = Math.sin(camYaw), cos = Math.cos(camYaw);
     const dx = cos * ix - sin * iy;
     const dz = -sin * ix - cos * iy;
+    // Schwere Last bremst – genau wie der Server rechnet (me.self.spd: 1 frei, 0 überladen)
+    const speed = RULES.speed * (me.self.spd ?? 1);
     const lim = RULES.worldHalf;
-    me.x = clamp(me.x + dx * RULES.speed * dt, -lim, lim);
-    me.z = clamp(me.z + dz * RULES.speed * dt, -lim, lim);
+    me.x = clamp(me.x + dx * speed * dt, -lim, lim);
+    me.z = clamp(me.z + dz * speed * dt, -lim, lim);
     me.ry = Math.atan2(dx, dz);
   }
-  animateCharacter(me.model, me.x, me.z, me.ry, strength * RULES.speed, dt);
+  animateCharacter(me.model, me.x, me.z, me.ry, strength * RULES.speed * (me.self.spd ?? 1), dt);
 }
 
 function updateOthers(dt) {

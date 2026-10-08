@@ -371,6 +371,224 @@ function get(port, urlPath) {
   });
 
   // =========================================================================
+  //  Schritt 4: Beute, Tasche mit Gewicht, Truhe
+  // =========================================================================
+  const f = new Client(port);
+  const o = new Client(port);
+  await f.ready();
+  await o.ready();
+  const you = (c, from, pred = () => true) => c.waitFor((m) => m.t === 'you' && pred(m), 3000, from);
+  const nudge = async (c, pred) => {        // bringt den Server dazu, die eigenen Werte zu schicken
+    const from = c.mark();
+    const x = c.p.x;
+    c.p.x = 50;
+    c.send({ t: 'chest', op: 'open' });
+    const m = await you(c, from, pred);
+    c.p.x = x;
+    return m;
+  };
+
+  await safely('Tragkraft', async () => {
+    ok('Tragkraft: 40 kg bei Stärke und Ausdauer 10', S.carryCap({ str: 10, sta: 10 }) === 40 && f.self.cap === 40
+      && f.self.load === 0 && f.self.spd === 1 && Object.keys(f.self.inv).length === 0);
+    ok('Tragkraft: Stärke zählt doppelt so viel wie Ausdauer',
+      S.carryCap({ str: 13, sta: 10 }) === 48 && S.carryCap({ str: 10, sta: 13 }) === 44);
+    ok('Tempo: bis zur Tragkraft voll, darüber langsamer, ab 1,5-fach Stillstand',
+      S.loadFactor(40, 40) === 1 && S.loadFactor(45, 40) === 0.83 && S.loadFactor(59.9, 40) > 0.29
+      && S.loadFactor(60, 40) === 0);
+  });
+
+  let loot = null;
+  await safely('Beute fällt', async () => {
+    S.WORLD.maxEnemies = 0;
+    await sleep(950);
+    const boar = placeInFront(f, 'boar', 1.5);
+    boar.hp = 1;
+    const from = f.mark(), fromO = o.mark();
+    f.send({ t: 'attack' });
+    const m = await f.waitFor((x) => x.t === 'loot', 3000, from);
+    loot = m.l;
+    const keys = Object.keys(loot.items);
+    ok('Besiegtes Tier lässt Beute am Boden liegen', Math.abs(loot.x - boar.x) < 0.01 && Math.abs(loot.z - boar.z) < 0.01
+      && keys.length > 0 && keys.every((k) => S.DROPS.boar.some((d) => d.k === k)), JSON.stringify(loot.items));
+    ok('Für den Sieger reserviert', loot.mine === true && loot.res > 29000);
+    const mo = await o.waitFor((x) => x.t === 'loot' && x.l.id === loot.id, 2000, fromO);
+    ok('Andere sehen sie, aber sie gehört ihnen noch nicht', mo.l.mine === false && mo.l.res > 29000);
+  });
+
+  await safely('Aufheben', async () => {
+    o.p.x = loot.x; o.p.z = loot.z;
+    let from = o.mark();
+    o.send({ t: 'pick', id: loot.id });
+    const r = await you(o, from, (m) => m.note);
+    ok('Fremde Beute: erst nach Ablauf der Reservierung', r.note === 'reserved' && r.wait >= 29 && S.loots.has(loot.id));
+    const fx = f.p.x;
+    f.p.x = loot.x + 10;
+    from = f.mark();
+    f.send({ t: 'pick', id: loot.id });
+    const far = await you(f, from, (m) => m.note);
+    ok('Zu weit weg: nichts passiert', far.note === 'far' && S.loots.has(loot.id));
+    f.p.x = fx;
+    from = f.mark();
+    const fromO = o.mark();
+    f.send({ t: 'pick', id: loot.id });
+    const got = await you(f, from, (m) => m.got);
+    ok('Aufgehoben: alles landet in der Tasche', JSON.stringify(got.got) === JSON.stringify(loot.items)
+      && JSON.stringify(got.self.inv) === JSON.stringify(loot.items) && !S.loots.has(loot.id));
+    ok('Gewicht wird mitgezählt', got.self.load === S.weightOf(loot.items) && got.self.load > 0);
+    const un = await o.waitFor((x) => x.t === 'unloot' && x.id === loot.id, 2000, fromO);
+    ok('Alle sehen, dass die Beute weg ist', un.by === f.id);
+    from = f.mark();
+    f.send({ t: 'pick', id: loot.id });
+    const gone = await you(f, from, (m) => m.note);
+    ok('Zweimal aufheben geht nicht', gone.note === 'gone');
+  });
+
+  await safely('Reservierung läuft ab', async () => {
+    const old = S.LOOT.reserveMs;
+    S.LOOT.reserveMs = 50;
+    const l = S.spawnLoot(o.p.x, o.p.z, { wolf_fang: 2 }, f.p.accountId);
+    S.LOOT.reserveMs = old;
+    await sleep(120);
+    const from = o.mark();
+    o.send({ t: 'pick', id: l.id });
+    const r = await you(o, from, (m) => m.got || m.note);
+    ok('Nach Ablauf darf jeder die Beute nehmen', !!r.got && o.p.inv.wolf_fang === 2);
+  });
+
+  await safely('Ablegen', async () => {
+    f.p.inv = { meat: 3, wolf_fang: 1 };
+    const n0 = S.loots.size;
+    f.send({ t: 'drop', k: 'gold', n: 1 });
+    f.send({ t: 'drop', k: 'meat', n: 9 });
+    f.send({ t: 'drop', k: 'meat', n: -1 });
+    f.send({ t: 'drop', k: '__proto__' });
+    await sleep(150);
+    ok('Unsinnige Mengen und unbekannte Dinge werden nicht abgelegt', S.loots.size === n0 && f.p.inv.meat === 3);
+    let from = f.mark();
+    const fromO = o.mark();
+    f.send({ t: 'drop', k: 'meat', n: 2 });
+    f.send({ t: 'drop', k: 'wolf_fang' });     // zu schnell hinterher: wird verworfen
+    const d = await you(f, from, (m) => m.dropped);
+    await sleep(150);
+    ok('Ablegen: Teil eines Stapels', d.dropped.meat === 2 && f.p.inv.meat === 1 && f.p.inv.wolf_fang === 1
+      && S.loots.size === n0 + 1);
+    const lm = await o.waitFor((x) => x.t === 'loot' && x.l.items.meat === 2, 2000, fromO);
+    ok('Abgelegtes gehört sofort allen', lm.l.mine === false && lm.l.res === 0);
+    await sleep(350);
+    from = f.mark();
+    f.send({ t: 'drop', k: 'wolf_fang' });
+    await you(f, from, (m) => m.dropped);
+    ok('Ohne Anzahl: der ganze Stapel', f.p.inv.wolf_fang === undefined);
+    o.p.x = lm.l.x; o.p.z = lm.l.z;
+    from = o.mark();
+    o.send({ t: 'pick', id: lm.l.id });
+    await you(o, from, (m) => m.got);
+    ok('Ein anderer kann es aufheben', o.p.inv.meat === 2);
+  });
+
+  await safely('Zu schwer', async () => {
+    f.p.inv = { boar_hide: 15 };            // 45 kg bei 40 kg Tragkraft
+    let m = await nudge(f);
+    ok('Über der Tragkraft: langsamer', m.self.load === 45 && m.self.spd === 0.83);
+    f.p.inv = { boar_hide: 20 };            // 60 kg: anderthalbfach
+    m = await nudge(f);
+    ok('Ab dem Anderthalbfachen: Stillstand', m.self.spd === 0);
+    await sleep(400);
+    const from = f.mark();
+    f.send({ t: 'move', x: f.p.x + 0.3, z: f.p.z, ry: 0, c: f.p.corr });
+    const c = await f.waitFor((x) => x.t === 'correct', 2000, from);
+    ok('Server lässt Überladene nicht laufen', !!c);
+    f.p.inv = { boar_hide: 15 };
+    f.p.budget = 0;
+    f.p.lastMoveAt = Date.now();
+    await sleep(500);                       // reicht bei vollem Tempo für 3,75 m, bei 0,825 für gut 3 m
+    const x0 = f.p.x;
+    const from2 = f.mark();
+    f.send({ t: 'move', x: x0 + 2.4, z: f.p.z, ry: 0, c: f.p.corr });
+    await sleep(150);
+    ok('Langsamer heißt: weniger Weg pro Zeit', f.p.x === x0 + 2.4 && !f.count((x) => x.t === 'correct', from2));
+    f.p.x = x0;
+    f.p.inv = {};
+  });
+
+  await safely('Truhe', async () => {
+    f.p.x = 20; f.p.z = 20;
+    let from = f.mark();
+    f.send({ t: 'chest', op: 'open' });
+    const far = await you(f, from, (m) => m.note);
+    ok('Truhe nur aus der Nähe', far.note === 'chestfar');
+    f.p.x = 1; f.p.z = 1;
+    f.p.inv = { meat: 3, wolf_pelt: 1 };
+    from = f.mark();
+    f.send({ t: 'chest', op: 'open' });
+    const open = await f.waitFor((x) => x.t === 'chest', 2000, from);
+    ok('Truhe öffnet sich, anfangs leer', Object.keys(open.items).length === 0);
+    from = f.mark();
+    f.send({ t: 'chest', op: 'store', k: 'meat' });
+    let ch = await f.waitFor((x) => x.t === 'chest', 2000, from);
+    ok('Einlagern: ganzer Stapel in die Truhe', ch.items.meat === 3 && f.p.inv.meat === undefined && f.p.inv.wolf_pelt === 1);
+    from = f.mark();
+    f.send({ t: 'chest', op: 'take', k: 'meat', n: 1 });
+    ch = await f.waitFor((x) => x.t === 'chest', 2000, from);
+    ok('Herausnehmen: auch einzeln', ch.items.meat === 2 && f.p.inv.meat === 1);
+    f.send({ t: 'chest', op: 'take', k: 'boar_hide' });
+    f.send({ t: 'chest', op: 'steal', k: 'meat' });
+    f.send({ t: 'chest', op: 'store', k: 'meat', n: 5 });
+    await sleep(150);
+    ok('Unsinnige Truhen-Befehle ändern nichts', f.p.chest.meat === 2 && f.p.inv.meat === 1 && !f.p.chest.boar_hide);
+    ok('Jeder hat seine eigene Truhe', Object.keys(o.p.chest).length === 0);
+  });
+
+  await safely('Tasche und Truhe bleiben gespeichert', async () => {
+    const token = f.token;
+    f.ws.close();
+    await f.closed;
+    await sleep(100);
+    const f2 = new Client(port, { t: 'resume', token });
+    await f2.ready();
+    ok('Nach dem Wiederkommen: Tasche noch da', f2.self.inv.meat === 1 && f2.self.inv.wolf_pelt === 1);
+    f2.p.x = 0.5; f2.p.z = 0.5;
+    const from = f2.mark();
+    f2.send({ t: 'chest', op: 'open' });
+    const ch = await f2.waitFor((x) => x.t === 'chest', 2000, from);
+    ok('Nach dem Wiederkommen: Truhe noch da', ch.items.meat === 2);
+    f2.ws.close();
+  });
+
+  await safely('Beute zerfällt', async () => {
+    const l = S.spawnLoot(30, 30, { meat: 1 }, null);
+    l.expiresAt = Date.now();
+    const from = o.mark();
+    const un = await o.waitFor((x) => x.t === 'unloot' && x.id === l.id, 2500, from);
+    ok('Liegengelassene Beute zerfällt', !!un && !S.loots.has(l.id));
+    const oldMax = S.LOOT.maxPiles;
+    S.loots.clear();
+    S.LOOT.maxPiles = 3;
+    const first = S.spawnLoot(31, 31, { meat: 1 }, null);
+    for (let i = 0; i < 3; i++) S.spawnLoot(31, 31, { meat: 1 }, null);
+    ok('Höchstens so viele Haufen wie erlaubt, der älteste zuerst weg', S.loots.size === 3 && !S.loots.has(first.id));
+    S.LOOT.maxPiles = oldMax;
+    const n = new Client(port);
+    await n.ready();
+    ok('Wer neu dazukommt, sieht die liegende Beute', n.welcome.loots.length === 3 && n.welcome.rules.items.meat.kg === 0.5);
+    n.ws.close();
+    o.ws.close();
+    S.loots.clear();
+  });
+
+  await safely('Kaputte Gegenstände im Speicher', async () => {
+    const st = S.getStore();
+    const id = await st.createAccount('Kramer', 'kramer', await require('../server/store').hashPassword('geheim123'));
+    await st.saveCharacter(id, { inv: { meat: 2.5, wolf_fang: 3, gold: 9, boar_tusk: -1 }, chest: [1, 2] });
+    const c = new Client(port, { t: 'login', name: 'Kramer', pass: 'geheim123' });
+    await c.ready();
+    ok('Nur gültige Gegenstände in ganzen Zahlen werden übernommen',
+      JSON.stringify(c.self.inv) === '{"wolf_fang":3}' && Object.keys(c.p.chest).length === 0, JSON.stringify(c.self.inv));
+    c.ws.close();
+  });
+
+  // =========================================================================
   //  Schritt 3: Anmeldung und Speichern (Speicher im Arbeitsspeicher)
   // =========================================================================
   const store = S.getStore();

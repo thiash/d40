@@ -1,6 +1,6 @@
 'use strict';
 // ===========================================================================
-//  D40 – Client, Teil 3 von 3: Kampf, Anzeigen und Effekte
+//  D40 – Client, Teil 3 von 4: Kampf, Anzeigen und Effekte
 //  Der Server entscheidet über Treffer, Schaden und Lernen. Hier wird nur
 //  eingegeben und angezeigt.
 // ===========================================================================
@@ -79,10 +79,12 @@ function refreshHud() {
   statRows.dodge.textContent = `${s.dodge} %`;
   statRows.heal.textContent = `${String(s.heal).replace('.', ',')} %`;
   document.body.classList.toggle('is-ko', me.ko);
+  if (typeof refreshLoad === 'function') refreshLoad();   // items.js: Last, Tasche, Truhe
 }
 
 function toggleStats() {
   const open = hud.stats.hidden;
+  if (open && typeof toggleBag === 'function') toggleBag(false);   // nur eine Tafel zur Zeit
   hud.stats.hidden = !open;
   hud.statsBtn.setAttribute('aria-expanded', String(open));
 }
@@ -222,6 +224,7 @@ function onYou(msg) {
   if (msg.heal) floatText(me.model, `+${msg.heal}`, '#9fe08a', 2.3);
   if (msg.note === 'mana') log('Nicht genug Mana.');
   if (msg.note === 'full') log('Du bist unverletzt.');
+  if (typeof onItemNotes === 'function') onItemNotes(msg);   // items.js: Beute, Truhe, Last
   if (msg.note === 'notarget') {     // kein Ziel: der Zauber war umsonst, sofort wieder bereit
     log('Kein Ziel in Reichweite.');
     lastCast = -Infinity;

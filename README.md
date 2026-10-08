@@ -3,7 +3,7 @@
 Ein Browser-MMORPG für Smartphones, inspiriert von »Die vierte Offenbarung« (D4O).
 Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.js.
 
-## Stand: Schritt 3 – Anmeldung und Speichern
+## Stand: Schritt 4 – Beute, Tasche und Truhe
 
 - **Schritt 1:** Mehrere Spieler sehen sich gegenseitig, der Server prüft jede Bewegung.
 - **Schritt 2:** Tiere (Hase, Wolf, Keiler), Kampf mit Schwert, Dolch, Bogen und zwei Zaubern,
@@ -12,13 +12,22 @@ Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.
   Das Gerät merkt sich die Anmeldung. Gespeichert werden Ort, Attribute, Leben, Mana und
   Waffe – alle 30 Sekunden, beim Verlassen und vor jedem Neustart des Servers.
   Die Werte-Tafel zeigt die Summe aller Attribute (Grundlage der späteren Wiedergeburts-Quest).
+- **Schritt 4:** Besiegte Tiere lassen Beute fallen (Fell, Schwarte, Zähne, Hauer, Wildfleisch).
+  Sie liegt als Sack am Boden und gehört 30 Sekunden lang nur dem Sieger, danach jedem.
+  Alles hat ein Gewicht. Die Tragkraft kommt zu ⅔ aus Stärke und zu ⅓ aus Ausdauer
+  (40 kg bei Startwerten, ohne Obergrenze). Wer mehr trägt, wird langsamer, ab dem
+  Anderthalbfachen geht nichts mehr. Abgelegtes gehört sofort allen. In der Mitte des
+  Startplatzes steht eine Truhe, die jeder Charakter für sich nutzt – ihr Inhalt
+  übersteht später auch die Wiedergeburt. Tasche und Truhe werden gespeichert.
 
 ## Steuerung
 
 - Handy: Joystick links, rechts wischen dreht die Kamera, Knöpfe rechts für Angriff,
-  Waffe, Zauber und Heilen. „Werte“ oben rechts öffnet die Tafel mit dem Abmelde-Knopf.
+  Waffe, Zauber und Heilen. Steht man bei Beute oder an der Truhe, erscheint darüber
+  der Knopf „Aufheben“ bzw. „Truhe öffnen“. Oben rechts öffnen „Tasche“ und „Werte“
+  ihre Tafeln, in der Werte-Tafel steht der Abmelde-Knopf.
 - PC: WASD laufen, Maus ziehen dreht die Kamera, Mausrad zoomt,
-  Leertaste angreifen, Q Waffe, E Zauber, R heilen, C Werte.
+  Leertaste angreifen, Q Waffe, E Zauber, R heilen, F aufheben / Truhe, I Tasche, C Werte.
 
 ## Betrieb (Render und Neon)
 
@@ -58,17 +67,18 @@ npm test
 ```
 
 Startet den echten Server und spielt mit echten und simulierten Clients durch:
-Kampf, Lernen, Anmeldung, Speichern, Neustart und Datenbank-Aussetzer.
+Kampf, Lernen, Anmeldung, Speichern, Neustart, Datenbank-Aussetzer, Beute, Gewicht und Truhe.
 Eine echte Datenbank ist dafür nicht nötig.
 
 ## Projektstruktur
 
 ```
 client/index.html   Aussehen, Bedienelemente, Anmeldeformular, Spielschleife
-client/world.js     Welt, Landschaft, Figuren und Tiere
+client/world.js     Welt, Landschaft, Figuren, Tiere, Beutesäcke und Truhe
 client/net.js       Steuerung, Netzwerk und Anmeldung
 client/combat.js    Kampf, Anzeigen, Werte-Tafel, Effekte
-server/index.js     Spielserver: Anmeldung, Bewegung, Kampf, Tiere, Speichertakt
+client/items.js     Beute, Tasche, Truhe, Last-Anzeige
+server/index.js     Spielserver: Anmeldung, Bewegung, Kampf, Tiere, Beute, Truhe, Speichertakt
 server/store.js     Speicher: Konten, Charaktere, Passwörter (scrypt), Datenbank
 test/               Automatische Tests für Server, Datenbank und Client
 ```

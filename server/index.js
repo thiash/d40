@@ -1,5 +1,6 @@
 // D40 – Spielserver
-// Schritt 3: Anmeldung und Speichern (Schritt 2: Tiere, Kampf, Lernen durch Tun).
+// Schritt 4: Beute, Tasche mit Gewicht und Truhe.
+// Davor: Anmeldung und Speichern (3), Tiere, Kampf, Lernen durch Tun (2).
 // Der Server ist autoritativ: Er prüft jede Bewegung und rechnet Treffer, Schaden,
 // Ausweichen, Heilung, Attributzuwachs und K.O. selbst aus. Der Client zeigt nur an.
 // Wer spielen will, meldet sich mit Name und Passwort an. Charaktere werden alle
@@ -12,8 +13,10 @@
 //     Server → Client:  auth {token,name,fresh}  denied {code,text}
 //   Im Spiel:
 //     Client → Server:  move {x,z,ry,c}  attack  cast {s}  weapon {w}  ping {ts}  logout
+//                       pick {id}  drop {k,n}  chest {op,k,n}
 //     Server → Client:  welcome join leave state correct pong gear
 //                       spawn despawn attack cast hitE hitP you ko revive
+//                       loot {l}  unloot {id,by}  chest {items}
 //                       kicked (woanders angemeldet)  bye (abgemeldet)  notice
 
 'use strict';
@@ -75,6 +78,32 @@ const ENEMY_KINDS = {
   boar: { name: 'Keiler', hp: 70, dmg: 9, speed: 3.0, aggro: 0, atkMs: 1500, share: 0.2 },
 };
 
+// Gegenstände: Gewicht in kg. "plural" für Meldungen wie "2 Wolfszähne".
+const ITEMS = {
+  hare_pelt: { name: 'Hasenfell', plural: 'Hasenfelle', kg: 0.3 },
+  wolf_pelt: { name: 'Wolfsfell', plural: 'Wolfsfelle', kg: 1.5 },
+  boar_hide: { name: 'Keilerschwarte', plural: 'Keilerschwarten', kg: 3 },
+  wolf_fang: { name: 'Wolfszahn', plural: 'Wolfszähne', kg: 0.05 },
+  boar_tusk: { name: 'Keilerhauer', plural: 'Keilerhauer', kg: 0.3 },
+  meat:      { name: 'Wildfleisch', plural: 'Wildfleisch', kg: 0.5 },
+};
+// Was ein besiegtes Tier fallen lässt: Chance p, Anzahl zwischen n[0] und n[1]
+const DROPS = {
+  hare: [{ k: 'hare_pelt', p: 0.8, n: [1, 1] }, { k: 'meat', p: 0.6, n: [1, 1] }],
+  wolf: [{ k: 'wolf_pelt', p: 0.7, n: [1, 1] }, { k: 'wolf_fang', p: 0.6, n: [1, 2] }, { k: 'meat', p: 0.4, n: [1, 1] }],
+  boar: [{ k: 'boar_hide', p: 0.75, n: [1, 1] }, { k: 'boar_tusk', p: 0.5, n: [1, 2] }, { k: 'meat', p: 0.8, n: [1, 3] }],
+};
+const LOOT = {
+  reach: 2.6,              // so nah muss man an Beute oder Truhe heran
+  reserveMs: 30000,        // so lange gehört die Beute nur dem Sieger
+  expireMs: 180000,        // danach zerfällt sie
+  maxPiles: 200,           // mehr Haufen liegen nie gleichzeitig in der Welt
+  dropGapMs: 300,          // Ablegen höchstens alle 0,3 Sekunden
+  maxStack: 99999,
+};
+const CHEST = { x: 0, z: 0, reach: 3 };   // die Truhe in der Mitte des Startplatzes
+const CARRY = { perPoint: 4, slowFrom: 1, stopAt: 1.5, minFactor: 0.3 };
+
 const RULES = {                    // geht beim Verbinden an den Client
   speed: 6,
   worldHalf: 95,
@@ -83,6 +112,9 @@ const RULES = {                    // geht beim Verbinden an den Client
   weapons: Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, w.name])),
   spells: Object.fromEntries(Object.entries(SPELLS).map(([k, s]) => [k, { name: s.name, cost: s.cost }])),
   enemies: Object.fromEntries(Object.entries(ENEMY_KINDS).map(([k, e]) => [k, e.name])),
+  items: ITEMS,
+  lootReach: LOOT.reach,
+  chest: CHEST,
 };
 
 const WORLD = { maxEnemies: 24 };  // Obergrenze für Tiere in der Testzone
@@ -109,6 +141,34 @@ const healShare = (a) => 0.05 + Math.max(0, a.wis - 10) * 0.001;      // Weishei
 const dodgeChance = (a) => clamp((a.agi - 10) * 0.01, 0, COMBAT.dodgeCap);  // Beweglichkeit → Ausweichen
 const attackCooldown = (a) =>                                         // Beweglichkeit → Angriffstempo
   Math.round(Math.max(COMBAT.minCooldown, COMBAT.baseCooldown * clamp(10 / a.agi, 0.5, 1)));
+// Stärke (2/3) und Ausdauer (1/3) → Tragkraft in kg, ohne Obergrenze
+const carryCap = (a) => Math.round(CARRY.perPoint * (a.str * 2 / 3 + a.sta / 3) * 10) / 10;
+const isItem = (k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(ITEMS, k);
+function weightOf(items) {
+  let kg = 0;
+  for (const k in items) if (isItem(k)) kg += ITEMS[k].kg * items[k];
+  return Math.round(kg * 100) / 100;
+}
+// Bis zur Tragkraft volles Tempo, darüber immer langsamer, ab dem Anderthalbfachen Stillstand
+function loadFactor(load, cap) {
+  if (load <= cap * CARRY.slowFrom) return 1;
+  if (load >= cap * CARRY.stopAt) return 0;
+  const over = (load - cap * CARRY.slowFrom) / (cap * (CARRY.stopAt - CARRY.slowFrom));
+  return Math.round((1 - over * (1 - CARRY.minFactor)) * 100) / 100;
+}
+// Gespeicherte oder empfangene Gegenstände prüfen: nur bekannte Arten, ganze Zahlen
+function cleanItems(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const k of Object.keys(raw)) {
+    const n = raw[k];
+    if (isItem(k) && Number.isInteger(n) && n > 0) out[k] = Math.min(n, LOOT.maxStack);
+  }
+  return out;
+}
+function addItems(into, items) {
+  for (const k in items) into[k] = Math.min((into[k] || 0) + items[k], LOOT.maxStack);
+}
 
 function damageOf(def, a) {                                           // Attribute → Schaden
   let d = def.base;
@@ -188,9 +248,11 @@ const conns = new Set();           // alle offenen Verbindungen, auch vor der An
 const pendingSaves = new Map();    // Konto → letzter Speichervorgang nach dem Verlassen
 const failsByIp = new Map();       // Internetadresse → Zeitpunkte falscher Anmeldungen
 const newByIp = new Map();         // Internetadresse → Zeitpunkte neuer Charaktere
+const loots = new Map();           // id → Beutehaufen am Boden
 let db = createStore(process.env.DATABASE_URL);
 let nextId = 1;
 let nextEnemyId = 1;
+let nextLootId = 1;
 let stopping = false;
 
 function publicPlayer(p) {
@@ -200,12 +262,21 @@ function publicPlayer(p) {
 function publicEnemy(e) {
   return { id: e.id, kind: e.kind, x: r2(e.x), z: r2(e.z), ry: r2(e.ry), hp: e.hp, hpMax: e.hpMax };
 }
+// Beutehaufen, wie ihn ein bestimmter Spieler sieht: mine = er hat das Tier besiegt,
+// res = so viele Millisekunden ist die Beute noch für den Sieger reserviert
+function publicLoot(l, viewer) {
+  return { id: l.id, x: r2(l.x), z: r2(l.z), items: { ...l.items },
+           mine: l.ownerAcc !== null && viewer.accountId === l.ownerAcc,
+           res: Math.max(0, l.reservedUntil - Date.now()) };
+}
 function selfView(p) {             // was nur der Spieler selbst über sich erfährt
+  const load = weightOf(p.inv), cap = carryCap(p.a);
   return {
     hp: Math.round(p.hp), hpMax: p.hpMax, mana: Math.floor(p.mana), manaMax: p.manaMax,
     a: { ...p.a }, weapon: p.weapon, ko: p.ko,
     cd: attackCooldown(p.a), dodge: Math.round(dodgeChance(p.a) * 100),
     heal: Math.round(healShare(p.a) * 1000) / 10,
+    inv: { ...p.inv }, load, cap, spd: loadFactor(load, cap),
   };
 }
 
@@ -270,6 +341,9 @@ function onConnection(ws, req) {
       case 'weapon': handleWeapon(p, msg); break;
       case 'ping': if (Number.isFinite(msg.ts)) send(p, { t: 'pong', ts: msg.ts }); break;
       case 'logout': handleLogout(p); break;
+      case 'pick': handlePick(p, msg); break;
+      case 'drop': handleDrop(p, msg); break;
+      case 'chest': handleChest(p, msg); break;
     }
   });
   ws.on('close', () => {
@@ -406,6 +480,7 @@ async function enterWorld(conn, account, token, fresh) {
     self: selfView(p),
     players: [...players.values()].filter((o) => o.id !== p.id).map(publicPlayer),
     enemies: [...enemies.values()].map(publicEnemy),
+    loots: [...loots.values()].map((l) => publicLoot(l, p)),
     rules: RULES,
   });
   broadcast({ t: 'join', player: publicPlayer(p) }, p.id);
@@ -439,6 +514,7 @@ function createPlayer(conn, account, data) {
     hp: Number.isFinite(d.hp) ? clamp(Math.round(d.hp), 1, hpMax) : hpMax,
     mana: Number.isFinite(d.mana) ? clamp(d.mana, 0, manaMax) : manaMax,
     weapon: WEAPONS[d.w] ? d.w : 'heavy', ups: [],
+    inv: cleanItems(d.inv), chest: cleanItems(d.chest), lastDropAt: 0,
     budget: MOVE_BUDGET_CAP, lastMoveAt: now, lastInputAt: now,
     lastAttackAt: 0, lastCastAt: 0, lastFightAt: 0,
     ko: false, koAt: 0, safeUntil: 0, autoTarget: null,
@@ -456,9 +532,10 @@ function createPlayer(conn, account, data) {
 // Was dauerhaft gespeichert wird
 function snapshot(p) {
   return {
-    v: 1, x: r2(p.x), z: r2(p.z), ry: r2(p.ry),
+    v: 2, x: r2(p.x), z: r2(p.z), ry: r2(p.ry),
     hp: Math.round(p.hp), mana: Math.floor(p.mana), w: p.weapon,
     a: { str: p.a.str, sta: p.a.sta, agi: p.a.agi, int: p.a.int, wis: p.a.wis },
+    inv: { ...p.inv }, chest: { ...p.chest },
   };
 }
 
@@ -514,9 +591,11 @@ function handleMove(p, msg) {
   if (![x, z, ry].every(Number.isFinite)) return;
 
   // Bewegungsbudget: wächst mit der Zeit nach, jede Bewegung verbraucht davon.
+  // Wer zu viel trägt, bekommt weniger Budget – bei Überlast gar keins.
   const now = Date.now();
-  p.budget = Math.min(MOVE_BUDGET_CAP,
-    p.budget + ((now - p.lastMoveAt) / 1000) * RULES.speed * SPEED_TOLERANCE);
+  const factor = loadFactor(weightOf(p.inv), carryCap(p.a));
+  p.budget = Math.min(MOVE_BUDGET_CAP * factor,
+    p.budget + ((now - p.lastMoveAt) / 1000) * RULES.speed * factor * SPEED_TOLERANCE);
   p.lastMoveAt = now;
 
   const d = Math.hypot(x - p.x, z - p.z);
@@ -589,7 +668,99 @@ function hurtEnemy(e, p, dmg, w) {
   if (e.hp <= 0) {
     enemies.delete(e.id);
     broadcast({ t: 'despawn', id: e.id, by: p.id });
+    const items = rollDrops(e.kind);
+    if (Object.keys(items).length) spawnLoot(e.x, e.z, items, p.accountId);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Beute, Tasche und Truhe
+// ---------------------------------------------------------------------------
+function rollDrops(kind) {
+  const items = {};
+  for (const d of DROPS[kind] || []) {
+    if (Math.random() >= d.p) continue;
+    items[d.k] = d.n[0] + Math.floor(Math.random() * (d.n[1] - d.n[0] + 1));
+  }
+  if (!Object.keys(items).length && DROPS[kind]) items[DROPS[kind][0].k] = 1;   // nie ganz leer
+  return items;
+}
+
+function spawnLoot(x, z, items, ownerAcc) {
+  while (loots.size >= LOOT.maxPiles) removeLoot(loots.keys().next().value, 0);   // der älteste zerfällt
+  const now = Date.now();
+  const l = {
+    id: nextLootId++, x, z, items, ownerAcc: ownerAcc === undefined ? null : ownerAcc,
+    reservedUntil: ownerAcc === undefined || ownerAcc === null ? 0 : now + LOOT.reserveMs,
+    expiresAt: now + LOOT.expireMs,
+  };
+  loots.set(l.id, l);
+  for (const q of players.values()) send(q, { t: 'loot', l: publicLoot(l, q) });
+  return l;
+}
+
+function removeLoot(id, by) {
+  if (!loots.delete(id)) return;
+  broadcast({ t: 'unloot', id, by });
+}
+
+function expireLoot() {                    // einmal pro Sekunde
+  const now = Date.now();
+  for (const l of [...loots.values()]) if (now >= l.expiresAt) removeLoot(l.id, 0);
+}
+
+function handlePick(p, msg) {
+  if (p.ko) return;
+  p.lastInputAt = Date.now();
+  const l = loots.get(msg.id);
+  if (!l) return sendSelf(p, { note: 'gone' });
+  if (dist(p, l) > LOOT.reach) return sendSelf(p, { note: 'far' });
+  const wait = l.reservedUntil - Date.now();
+  if (wait > 0 && l.ownerAcc !== p.accountId) return sendSelf(p, { note: 'reserved', wait: Math.ceil(wait / 1000) });
+  addItems(p.inv, l.items);
+  removeLoot(l.id, p.id);
+  sendSelf(p, { got: l.items });           // auch über der Tragkraft: dann wird man eben langsam
+}
+
+// k = Gegenstand, n = Anzahl (ohne n: der ganze Stapel)
+function takeCount(from, msg) {
+  if (!isItem(msg.k) || !from[msg.k]) return 0;
+  const have = from[msg.k];
+  if (msg.n === undefined) return have;
+  return Number.isInteger(msg.n) && msg.n > 0 && msg.n <= have ? msg.n : 0;   // mehr als vorhanden: nichts
+}
+function moveItem(from, to, k, n) {
+  from[k] -= n;
+  if (from[k] <= 0) delete from[k];
+  if (to) to[k] = Math.min((to[k] || 0) + n, LOOT.maxStack);
+}
+
+function handleDrop(p, msg) {
+  if (p.ko) return;
+  const now = Date.now();
+  if (now - p.lastDropAt < LOOT.dropGapMs) return;
+  const n = takeCount(p.inv, msg);
+  if (!n) return;
+  p.lastDropAt = now;
+  p.lastInputAt = now;
+  moveItem(p.inv, null, msg.k, n);
+  spawnLoot(p.x, p.z, { [msg.k]: n }, null);   // abgelegt: gehört sofort allen
+  sendSelf(p, { dropped: { [msg.k]: n } });
+}
+
+// op: open (Inhalt zeigen), store (aus der Tasche hinein), take (heraus in die Tasche)
+function handleChest(p, msg) {
+  if (p.ko || !['open', 'store', 'take'].includes(msg.op)) return;
+  p.lastInputAt = Date.now();
+  if (dist(p, CHEST) > CHEST.reach) return sendSelf(p, { note: 'chestfar' });
+  if (msg.op === 'store' || msg.op === 'take') {
+    const [from, to] = msg.op === 'store' ? [p.inv, p.chest] : [p.chest, p.inv];
+    const n = takeCount(from, msg);
+    if (!n) return;
+    moveItem(from, to, msg.k, n);
+    sendSelf(p);
+  }
+  send(p, { t: 'chest', items: { ...p.chest } });
 }
 
 // Ein Schlag oder Schuss mit der angelegten Waffe – von Hand oder als Gegenangriff
@@ -870,6 +1041,7 @@ function start(port = Number(process.env.PORT) || 3000, opts = {}) {
   timers = [
     setInterval(tick, 1000 / TICK_RATE),
     setInterval(regenTick, 1000),
+    setInterval(expireLoot, 1000),
     setInterval(maintainEnemies, 5000),
     setInterval(checkAlive, 30000),
     setInterval(() => { for (const p of players.values()) savePlayer(p); }, SAVE.everyMs),
@@ -905,6 +1077,7 @@ async function stop() {
   conns.clear();
   players.clear();
   enemies.clear();
+  loots.clear();
   pendingSaves.clear();
   failsByIp.clear();
   newByIp.clear();
@@ -940,8 +1113,9 @@ if (require.main === module) {
 
 // Für die automatischen Tests
 module.exports = {
-  start, stop, saveAll, players, enemies, conns, spawnEnemy, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS,
+  start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY,
+  carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,
 };

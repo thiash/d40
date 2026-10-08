@@ -1,6 +1,6 @@
 {
   "name": "d40",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Browser-MMORPG für Smartphones – Server und Client",
   "main": "server/index.js",
