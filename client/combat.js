@@ -37,10 +37,12 @@ const hud = {
   hurt: document.getElementById('hurt'),
 };
 
-// ---- Werte-Tafel: fünf Attribute, darunter was sie bewirken ----
+// ---- Werte-Tafel: fünf Attribute, ihre Summe, darunter was sie bewirken ----
+// Die Summe zählt später für die Wiedergeburts-Quest.
 const statRows = {};
 for (const [key, label] of [
-  ...Object.entries(ATTR_NAMES), ['cd', 'Angriffstempo'], ['dodge', 'Ausweichen'], ['heal', 'Heilung'],
+  ...Object.entries(ATTR_NAMES), ['sum', 'Summe'],
+  ['cd', 'Angriffstempo'], ['dodge', 'Ausweichen'], ['heal', 'Heilung'],
 ]) {
   const dt = document.createElement('dt');
   dt.textContent = label;
@@ -67,7 +69,12 @@ function refreshHud() {
   }
   hud.spell.classList.toggle('low', s.mana < RULES.spells.int.cost);
   hud.heal.classList.toggle('low', s.mana < RULES.spells.wis.cost);
-  for (const k in ATTR_NAMES) statRows[k].textContent = fmt(s.a[k]);
+  let sum = 0;
+  for (const k in ATTR_NAMES) {
+    statRows[k].textContent = fmt(s.a[k]);
+    sum += s.a[k];
+  }
+  statRows.sum.textContent = fmt(sum);
   statRows.cd.textContent = `${fmt(s.cd / 1000)} s`;
   statRows.dodge.textContent = `${s.dodge} %`;
   statRows.heal.textContent = `${String(s.heal).replace('.', ',')} %`;
@@ -138,6 +145,7 @@ bindButton(hud.weapon, cycleWeapon);
 bindButton(hud.spell, () => castSpell('int'));
 bindButton(hud.heal, () => castSpell('wis'));
 hud.statsBtn.addEventListener('click', toggleStats);
+document.getElementById('logout').addEventListener('click', logout);
 
 // ===========================================================================
 //  Nachrichten vom Server
