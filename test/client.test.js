@@ -370,13 +370,13 @@ function makeEl(id, hidden = false) {
   // ---- Aussehen ----
   ok('Figur hat ein Aussehen', ev('me.model.userData.look.sex') === 'm' && ev('!!me.model.userData.j.head') === true);
   el('look-btn').dispatch('click');
-  ok('Aussehen-Panel öffnet sich, die Kamera schaut auf die Figur', el('look').hidden === false && ev('camDist') === 4.2);
+  ok('Aussehen-Panel öffnet sich, die Kamera schaut auf die Figur', el('look').hidden === false && ev('camDist') === 3.4);
   el('look-sex').children[1].dispatch('click');
   await until(() => ev('me.look && me.look.sex') === 'f');
   ok('Frau gewählt: der Server bestätigt, die Figur wird neu gebaut', ev('me.model.userData.look.sex') === 'f' && P().look.sex === 'f');
   ok('Frisuren für Frauen, kein Bart', el('look-style').children[1].textContent === 'Pferdeschwanz' && el('look-beard-row').hidden === true);
   el('look-close').dispatch('click');
-  ok('Fertig: Panel zu, Kamera zurück', el('look').hidden === true && ev('camDist') !== 4.2);
+  ok('Fertig: Panel zu, Kamera zurück', el('look').hidden === true && ev('camDist') !== 3.4);
   ok('Gebäude blockieren im Client wie im Server', ev('inBuilding(-24, -16)') === true && ev('inBuilding(0, 0)') === false);
 
   // ---- Abmelden ----
