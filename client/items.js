@@ -6,6 +6,7 @@
 
 const lootPiles = new Map();        // id → { model, x, z, items, mine, freeAt, free }
 const chestModel = makeChest(RULES.chest.x, RULES.chest.z);
+makeVillage();
 
 const itemsUi = {
   use: document.getElementById('use'),
@@ -22,15 +23,22 @@ const itemsUi = {
   chestClose: document.getElementById('chest-close'),
   loadBar: document.getElementById('load-bar'),
   loadText: document.getElementById('load-text'),
+  craft: document.getElementById('craft'),
+  craftTitle: document.getElementById('craft-title'),
+  craftNote: document.getElementById('craft-note'),
+  craftList: document.getElementById('craft-list'),
+  craftClose: document.getElementById('craft-close'),
 };
 
 const itemState = {
   target: null,                     // was der Knopf gerade tut: { kind: 'loot', pile } oder { kind: 'chest' }
   useBlockedUntil: 0,               // kurz sperren, damit ein Doppeltipp nicht zweimal schickt
   chestOpen: false,
+  craftMode: '',                    // '' | 'forge' | 'fire': welches Menü gerade offen ist
   chestItems: {},
   bagKey: '',                       // zuletzt gezeichneter Inhalt, um unnötiges Neuzeichnen zu sparen
   chestKey: '',
+  craftKey: '',
   spd: 1,                           // zuletzt bekanntes Tempo – für Meldungen beim Überladen
 };
 
@@ -95,12 +103,21 @@ function findTarget() {
     if (d <= bestD) { best = { kind: 'loot', pile }; bestD = d; }
   }
   if (best) return best;
-  if (Math.hypot(RULES.chest.x - me.x, RULES.chest.z - me.z) <= RULES.chest.reach - 0.15) return { kind: 'chest' };
+  const near = (p) => Math.hypot(p.x - me.x, p.z - me.z);
+  if (near(RULES.chest) <= RULES.chest.reach - 0.15) return { kind: 'chest' };
+  if (near(RULES.forge) <= RULES.forge.reach - 0.15) return { kind: 'forge' };
+  if (near(RULES.fire) <= RULES.fire.reach - 0.15) return { kind: 'fire' };
   return null;
 }
 
 function setTarget(t) {
-  const label = !t ? '' : t.kind === 'loot' ? 'Aufheben' : itemState.chestOpen ? 'Truhe schließen' : 'Truhe öffnen';
+  let label = '';
+  if (t) {
+    if (t.kind === 'loot') label = 'Aufheben';
+    else if (t.kind === 'forge') label = itemState.craftMode === 'forge' ? 'Schließen' : 'Schmieden';
+    else if (t.kind === 'fire') label = itemState.craftMode === 'fire' ? 'Schließen' : 'Am Feuer';
+    else label = itemState.chestOpen ? 'Truhe schließen' : 'Truhe öffnen';
+  }
   itemState.target = t;
   if (itemsUi.useLabel.textContent !== label) itemsUi.useLabel.textContent = label;
   itemsUi.use.hidden = !t;
@@ -112,8 +129,103 @@ function useNearest() {
   if (!t || now < itemState.useBlockedUntil) return;
   itemState.useBlockedUntil = now + 350;
   if (t.kind === 'loot') sendMsg({ t: 'pick', id: t.pile.id });
+  else if (t.kind === 'forge' || t.kind === 'fire') {
+    if (itemState.craftMode === t.kind) closeCraft();
+    else openCraft(t.kind);
+  }
   else if (itemState.chestOpen) closeChest();
   else sendMsg({ t: 'chest', op: 'open' });
+}
+
+// ===========================================================================
+//  Schmiede und Lagerfeuer: ein gemeinsames Menü
+// ===========================================================================
+const CRAFT_HINT = {
+  forge: 'Zutaten kommen aus deiner Tasche. Geschmiedete Waffen trägst du bei dir.',
+  fire: 'Rohes Fleisch wird am Feuer gegrillt. Gegrilltes heilt doppelt so viel.',
+};
+
+function openCraft(mode) {
+  if (itemState.craftMode === mode) return;
+  closeChest();
+  toggleBag(false);
+  if (!hud.stats.hidden) toggleStats();
+  itemState.craftMode = mode;
+  itemsUi.craft.hidden = false;
+  document.body.classList.add('chest-open');
+  renderCraft(true);
+}
+
+function closeCraft() {
+  if (!itemState.craftMode) return;
+  itemState.craftMode = '';
+  itemsUi.craft.hidden = true;
+  if (!itemState.chestOpen) document.body.classList.remove('chest-open');
+  setTarget(itemState.target);      // Knopf-Beschriftung zurücksetzen
+}
+
+function craftButton(label, onClick, enabled = true) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = label;
+  btn.disabled = !enabled;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function renderCraft(force) {
+  if (!itemState.craftMode) return;
+  const inv = me.self.inv || {};
+  const mode = itemState.craftMode;
+  const key = mode + JSON.stringify(inv);
+  if (!force && key === itemState.craftKey) return;
+  itemState.craftKey = key;
+  itemsUi.craftTitle.textContent = mode === 'forge' ? 'Schmiede' : 'Lagerfeuer';
+  itemsUi.craftNote.textContent = CRAFT_HINT[mode];
+  clearEl(itemsUi.craftList);
+
+  if (mode === 'forge') {
+    for (const r of Object.keys(RULES.craft)) {
+      const cost = RULES.craft[r];
+      const row = document.createElement('div');
+      row.className = 'item';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = RULES.weapons[r] || (RULES.items[r] ? RULES.items[r].name : r);
+      const costText = document.createElement('span');
+      costText.className = 'cost';
+      costText.textContent = listItems(cost);
+      const ok = Object.keys(cost).every((k) => (inv[k] || 0) >= cost[k]);
+      row.appendChild(name);
+      row.appendChild(costText);
+      row.appendChild(craftButton('Schmieden', () => sendMsg({ t: 'craft', r }), ok));
+      itemsUi.craftList.appendChild(row);
+    }
+  } else {
+    const meat = inv.meat || 0;
+    const row = document.createElement('div');
+    row.className = 'item';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = `${meat} × Wildfleisch`;
+    const info = document.createElement('span');
+    info.className = 'cost';
+    info.textContent = 'roh';
+    row.appendChild(name);
+    row.appendChild(info);
+    row.appendChild(craftButton('Eins grillen', () => sendMsg({ t: 'cook', k: 'meat', n: 1 }), meat > 0));
+    row.appendChild(craftButton('Alle grillen', () => sendMsg({ t: 'cook', k: 'meat' }), meat > 0));
+    itemsUi.craftList.appendChild(row);
+  }
+}
+
+// Zusatzknopf in einer Tasche-Zeile (Essen, Anlegen)
+function addRowButton(row, label, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  row.insertBefore(btn, row.lastChild);
 }
 
 // ===========================================================================
@@ -150,6 +262,8 @@ function itemRow(k, n, op, label) {
 
 function itemAction(op, k) {
   if (op === 'drop') sendMsg({ t: 'drop', k });
+  else if (op === 'eat') sendMsg({ t: 'eat', k });
+  else if (op === 'wield') sendMsg({ t: 'weapon', w: k });
   else sendMsg({ t: 'chest', op, k });
 }
 
@@ -176,7 +290,12 @@ function renderBag(force) {
   clearEl(itemsUi.bagList);
   const keys = sortedKeys(s.inv || {});
   if (!keys.length) itemsUi.bagList.appendChild(emptyNote('Deine Tasche ist leer. Besiegte Tiere lassen Beute fallen.'));
-  for (const k of keys) itemsUi.bagList.appendChild(itemRow(k, s.inv[k], 'drop', 'Ablegen'));
+  for (const k of keys) {
+    const row = itemRow(k, s.inv[k], 'drop', 'Ablegen');
+    if (RULES.food[k]) addRowButton(row, 'Essen', () => itemAction('eat', k));
+    if (RULES.weapons[k]) addRowButton(row, 'Anlegen', () => itemAction('wield', k));   // geschmiedete Waffe
+    itemsUi.bagList.appendChild(row);
+  }
 }
 
 // Last-Balken unter Leben und Mana
@@ -188,6 +307,7 @@ function refreshLoad() {
   itemsUi.loadText.textContent = `${fmtKg(load)} / ${Math.round(cap)}`;
   renderBag(false);
   renderChest(false);
+  renderCraft(false);
 }
 
 // ===========================================================================
@@ -197,6 +317,7 @@ function openChest(items) {
   itemState.chestItems = items || {};
   if (!itemState.chestOpen) {
     itemState.chestOpen = true;
+    closeCraft();
     toggleBag(false);
     if (!hud.stats.hidden) toggleStats();
     itemsUi.chest.hidden = false;
@@ -209,7 +330,7 @@ function closeChest() {
   if (!itemState.chestOpen) return;
   itemState.chestOpen = false;
   itemsUi.chest.hidden = true;
-  document.body.classList.remove('chest-open');
+  if (!itemState.craftMode) document.body.classList.remove('chest-open');
 }
 
 function renderChest(force) {
@@ -249,7 +370,13 @@ function onItemNotes(msg) {
     case 'gone': log('Die Beute ist schon weg.'); break;
     case 'reserved': log(`Diese Beute gehört noch ${msg.wait} Sekunden dem Sieger.`); break;
     case 'chestfar': log('Die Truhe ist zu weit weg.'); closeChest(); break;
+    case 'forgefar': log('Die Schmiede ist zu weit weg.'); closeCraft(); break;
+    case 'firefar': log('Das Lagerfeuer ist zu weit weg.'); closeCraft(); break;
+    case 'missing': log('Dir fehlen die Zutaten.'); break;
   }
+  if (msg.crafted) log(`Du schmiedest ${listItems(msg.crafted)}.`);
+  if (msg.cooked) log(`Du grillst ${listItems(msg.cooked)}.`);
+  if (msg.ate) log(msg.ate === 'grilled_meat' ? 'Du isst das gegrillte Fleisch.' : 'Du isst das rohe Fleisch. Besser wäre es gegrillt.');
   const spd = msg.self.spd ?? 1;
   if (spd !== itemState.spd) {
     if (spd === 0) log('Du trägst zu viel und kommst nicht mehr vom Fleck. Leg etwas ab.');
@@ -262,6 +389,7 @@ function onItemNotes(msg) {
 function resetItems() {             // Abmelden oder Verbindung weg
   clearPiles();
   closeChest();
+  closeCraft();
   toggleBag(false);
   setTarget(null);
   itemState.spd = 1;
@@ -283,10 +411,15 @@ function updateItems(dt) {
       && (me.ko || !isOnline() || Math.hypot(RULES.chest.x - me.x, RULES.chest.z - me.z) > RULES.chest.reach + 0.5)) {
     closeChest();                   // weggegangen: Truhe zu
   }
+  if (itemState.craftMode) {
+    const at = RULES[itemState.craftMode];
+    if (me.ko || !isOnline() || Math.hypot(at.x - me.x, at.z - me.z) > at.reach + 0.5) closeCraft();
+  }
+  animateVillage(performance.now() / 1000);
   const t = findTarget();
   const old = itemState.target;
-  const same = (!t && !old) || (t && old && t.kind === old.kind && (t.kind === 'chest' || t.pile === old.pile));
-  if (!same || (t && t.kind === 'chest')) setTarget(t);
+  const same = (!t && !old) || (t && old && t.kind === old.kind && (t.kind !== 'loot' || t.pile === old.pile));
+  if (!same || (t && t.kind !== 'loot')) setTarget(t);
 }
 
 // ---- Bedienung ----
@@ -297,3 +430,4 @@ function bindTap(btn, fn) {
 bindTap(itemsUi.use, useNearest);
 itemsUi.bagBtn.addEventListener('click', () => toggleBag());
 itemsUi.chestClose.addEventListener('click', closeChest);
+itemsUi.craftClose.addEventListener('click', closeCraft);

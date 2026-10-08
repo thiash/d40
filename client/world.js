@@ -11,6 +11,7 @@ const RULES = {
   spells: { int: { name: 'Intelligenzzauber', cost: 5 }, wis: { name: 'Weisheitszauber', cost: 6 } },
   enemies: { hare: 'Hase', wolf: 'Wolf', boar: 'Keiler' },
   items: {}, lootReach: 2.6, chest: { x: 0, z: 0, reach: 3 },
+  craft: {}, food: {}, forge: { x: -14, z: -8, reach: 3 }, fire: { x: 14, z: -8, reach: 3 },
 };
 const WATER_LEVEL = -3.2;
 const SEND_RATE = 15;               // Bewegungs-Updates pro Sekunde an den Server
@@ -221,6 +222,8 @@ const MATS = {
   steel:   new THREE.MeshLambertMaterial({ color: 0xc9cfd4 }),
   wood:    new THREE.MeshLambertMaterial({ color: 0x7b5a36 }),
   string:  new THREE.MeshLambertMaterial({ color: 0xe8dcc0 }),
+  iron:    new THREE.MeshLambertMaterial({ color: 0x4a525a }),        // geschmiedetes Eisen
+  darkwood: new THREE.MeshLambertMaterial({ color: 0x4a3520 }),
 };
 
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -299,8 +302,12 @@ function makeCharacter(color, name) {
     heavy:  group(mesh(PARTS.guard, MATS.cloth), mesh(PARTS.blade, MATS.steel)),
     dagger: group(mesh(PARTS.hilt, MATS.leather), mesh(PARTS.knife, MATS.steel)),
     bow:    group(mesh(PARTS.bow, MATS.wood), mesh(PARTS.string, MATS.string)),
+    iron_sword:  group(mesh(PARTS.guard, MATS.cloth), mesh(PARTS.blade, MATS.iron)),
+    iron_dagger: group(mesh(PARTS.hilt, MATS.leather), mesh(PARTS.knife, MATS.iron)),
+    longbow:     group(mesh(PARTS.bow, MATS.darkwood), mesh(PARTS.string, MATS.string)),
   };
-  const armR = joint(0.42, 1.5, 0.04, mesh(PARTS.armR, MATS.skin), gear.heavy, gear.dagger, gear.bow);
+  const armR = joint(0.42, 1.5, 0.04, mesh(PARTS.armR, MATS.skin),
+    gear.heavy, gear.dagger, gear.bow, gear.iron_sword, gear.iron_dagger, gear.longbow);
   armR.rotation.x = ARM_REST;
 
   const tag = makeNameTag(name);
@@ -604,4 +611,65 @@ function makeChest(x, z) {
   root.rotation.y = 0.35;
   scene.add(root);
   return root;
+}
+
+// ---- Dorf neben dem Startplatz: Schmiede, Lagerfeuer, zwei Häuser (nur Kulisse) ----
+const VM = {
+  stone: new THREE.MeshLambertMaterial({ color: 0x8b8377 }),
+  wall:  new THREE.MeshLambertMaterial({ color: 0xa88a62 }),
+  roof:  new THREE.MeshLambertMaterial({ color: 0x5b3a2a }),
+  dark:  new THREE.MeshLambertMaterial({ color: 0x2e2a27 }),
+  ember: new THREE.MeshLambertMaterial({ color: 0xff7a2a, emissive: 0xff5a10 }),
+  wood:  new THREE.MeshLambertMaterial({ color: 0x6e4a2c }),
+};
+const VILLAGE = { flame: null };
+
+// Eine Gruppe auf dem Boden, deren Teile relativ zu ihrem Ursprung stehen
+function place(x, z, angle = 0) {
+  const g = new THREE.Group();
+  g.position.set(x, groundY(x, z) - 0.02, z);
+  g.rotation.y = angle;
+  scene.add(g);
+  return g;
+}
+function part(g, geo, mat, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  g.add(m);
+  return m;
+}
+function house(x, z, angle, w, d, h) {
+  const g = place(x, z, angle);
+  part(g, box(w, h, d), VM.wall, 0, h / 2, 0);
+  part(g, flat(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 1.3, 4).rotateY(Math.PI / 4)), VM.roof, 0, h + 0.65, 0);
+  return g;
+}
+
+function makeVillage() {
+  // Schmiede: Mauern, Dach, Esse mit Glut, Amboss und Schornstein
+  const forge = place(RULES.forge.x, RULES.forge.z, 0);
+  part(forge, box(4, 2.4, 3.4), VM.stone, 0, 1.2, 0);
+  part(forge, flat(new THREE.ConeGeometry(2.7, 1.3, 4).rotateY(Math.PI / 4)), VM.roof, 0, 2.75, 0);
+  part(forge, box(1.0, 0.8, 0.25), VM.ember, 0.9, 0.9, 1.75);
+  part(forge, box(0.6, 0.5, 0.4), VM.dark, -1.0, 0.25, 0.9);
+  part(forge, box(0.4, 1.8, 0.4), VM.stone, 1.3, 3.1, -0.9);
+
+  // Lagerfeuer: Steinkranz, Holz, flackernde Flamme
+  const fire = place(RULES.fire.x, RULES.fire.z, 0);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    part(fire, new THREE.DodecahedronGeometry(0.22, 0), VM.stone, Math.cos(a) * 0.85, 0.1, Math.sin(a) * 0.85);
+  }
+  part(fire, box(1.1, 0.16, 0.18), VM.wood, 0, 0.12, 0).rotation.y = 0.7;
+  part(fire, box(1.1, 0.16, 0.18), VM.wood, 0, 0.14, 0).rotation.y = -0.7;
+  VILLAGE.flame = part(fire, new THREE.ConeGeometry(0.35, 0.9, 5), VM.ember, 0, 0.6, 0);
+
+  house(-24, -16, 0.4, 3, 2.6, 2.2);
+  house(10, -20, -0.3, 2.6, 2.4, 2);
+}
+
+function animateVillage(t) {               // Flamme flackert
+  if (!VILLAGE.flame) return;
+  const s = 1 + Math.sin(t * 9) * 0.08 + Math.sin(t * 23) * 0.04;
+  VILLAGE.flame.scale.set(1, s, 1);
 }
