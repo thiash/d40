@@ -111,11 +111,13 @@ function makeEl(id, hidden = false) {
   const run = (file) => vm.runInContext(fs.readFileSync(path.join(dir, file), 'utf8'), ctx, { filename: file });
 
   run('world.js');
+  run('character.js');
   ev('var __logs = []; { const orig = log; log = function (t) { __logs.push(t); orig(t); }; }');
   run('net.js');
   run('combat.js');
   run('items.js');
   run('admin.js');
+  run('look.js');
   vm.runInContext(inline, ctx, { filename: 'index.html' });
 
   async function pump(ms) {
@@ -365,6 +367,16 @@ function makeEl(id, hidden = false) {
   ok('Weggehen schließt das Lagerfeuer-Menü', el('craft').hidden === true);
 
   ok('Verwaltung ist für normale Spieler verborgen', el('admin-btn').hidden === true && el('admin').hidden === true);
+  // ---- Aussehen ----
+  ok('Figur hat ein Aussehen', ev('me.model.userData.look.sex') === 'm' && ev('!!me.model.userData.j.head') === true);
+  el('look-btn').dispatch('click');
+  ok('Aussehen-Panel öffnet sich, die Kamera schaut auf die Figur', el('look').hidden === false && ev('camDist') === 4.2);
+  el('look-sex').children[1].dispatch('click');
+  await until(() => ev('me.look && me.look.sex') === 'f');
+  ok('Frau gewählt: der Server bestätigt, die Figur wird neu gebaut', ev('me.model.userData.look.sex') === 'f' && P().look.sex === 'f');
+  ok('Frisuren für Frauen, kein Bart', el('look-style').children[1].textContent === 'Pferdeschwanz' && el('look-beard-row').hidden === true);
+  el('look-close').dispatch('click');
+  ok('Fertig: Panel zu, Kamera zurück', el('look').hidden === true && ev('camDist') !== 4.2);
   ok('Gebäude blockieren im Client wie im Server', ev('inBuilding(-24, -16)') === true && ev('inBuilding(0, 0)') === false);
 
   // ---- Abmelden ----

@@ -26,7 +26,6 @@ const RULES = {
 };
 const WATER_LEVEL = -3.2;
 const SEND_RATE = 15;               // Bewegungs-Updates pro Sekunde an den Server
-const ARM_REST = 0.9;               // Ruhehaltung des Waffenarms (Radiant)
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -209,34 +208,8 @@ buildTerrain();
 buildNature();
 
 // ===========================================================================
-//  Figuren – Low-Poly-Platzhalter, später ersetzt durch echte Modelle mit Rig
+//  Namensschilder (die Figuren selbst stehen in character.js)
 // ===========================================================================
-const PARTS = {
-  leg:    flat(new THREE.CylinderGeometry(0.12, 0.1, 0.8, 5).translate(0, -0.4, 0)),
-  torso:  flat(new THREE.CylinderGeometry(0.32, 0.42, 0.85, 6)),
-  head:   flat(new THREE.IcosahedronGeometry(0.27, 0)),
-  pack:   flat(new THREE.BoxGeometry(0.46, 0.52, 0.24)),      // der Rucksack – unser Inventar
-  armL:   flat(new THREE.CylinderGeometry(0.08, 0.07, 0.6, 5).translate(0, -0.3, 0)),
-  armR:   flat(new THREE.CylinderGeometry(0.08, 0.07, 0.55, 5).rotateX(Math.PI / 2).translate(0, 0, 0.27)),
-  guard:  flat(new THREE.BoxGeometry(0.3, 0.06, 0.06).translate(0, 0, 0.6)),
-  blade:  flat(new THREE.BoxGeometry(0.07, 0.04, 0.95).translate(0, 0, 1.1)),
-  hilt:   flat(new THREE.BoxGeometry(0.18, 0.05, 0.05).translate(0, 0, 0.6)),
-  knife:  flat(new THREE.BoxGeometry(0.05, 0.03, 0.42).translate(0, 0, 0.84)),
-  // Bogen: Halbkreis, dessen Griff in der Hand liegt, die Enden zeigen zum Körper
-  bow:    flat(new THREE.TorusGeometry(0.55, 0.03, 3, 10, Math.PI).rotateZ(-Math.PI / 2).rotateY(-Math.PI / 2)),
-  string: new THREE.BoxGeometry(0.012, 1.1, 0.012),
-};
-const MATS = {
-  skin:    new THREE.MeshLambertMaterial({ color: 0xe0b48e }),
-  cloth:   new THREE.MeshLambertMaterial({ color: 0x3b2f27 }),
-  leather: new THREE.MeshLambertMaterial({ color: 0x7a5534 }),
-  steel:   new THREE.MeshLambertMaterial({ color: 0xc9cfd4 }),
-  wood:    new THREE.MeshLambertMaterial({ color: 0x7b5a36 }),
-  string:  new THREE.MeshLambertMaterial({ color: 0xe8dcc0 }),
-  iron:    new THREE.MeshLambertMaterial({ color: 0x4a525a }),        // geschmiedetes Eisen
-  darkwood: new THREE.MeshLambertMaterial({ color: 0x4a3520 }),
-};
-
 function roundRectPath(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -275,135 +248,6 @@ function makeNameTag(text) {
   sprite.userData.text = text;
   drawTag(sprite);
   return sprite;
-}
-
-function makeCharacter(color, name) {
-  const root = new THREE.Group();
-  const body = new THREE.Group();   // alles außer dem Namensschild – wippt beim Laufen
-  root.add(body);
-  const tunic = new THREE.MeshLambertMaterial({ color });
-
-  const mesh = (geo, mat, x = 0, y = 0, z = 0) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z);
-    return m;
-  };
-  const joint = (x, y, z, ...children) => {
-    const g = new THREE.Group();
-    g.position.set(x, y, z);
-    g.add(...children);
-    body.add(g);
-    return g;
-  };
-  const group = (...children) => {
-    const g = new THREE.Group();
-    g.add(...children);
-    return g;
-  };
-
-  const legL = joint(-0.17, 0.8, 0, mesh(PARTS.leg, MATS.cloth));
-  const legR = joint(0.17, 0.8, 0, mesh(PARTS.leg, MATS.cloth));
-  body.add(mesh(PARTS.torso, tunic, 0, 1.22, 0));
-  body.add(mesh(PARTS.head, MATS.skin, 0, 1.88, 0));
-  body.add(mesh(PARTS.pack, MATS.leather, 0, 1.28, -0.36));
-  const armL = joint(-0.42, 1.5, 0, mesh(PARTS.armL, MATS.skin));
-
-  // Alle drei Waffen hängen an der rechten Hand, sichtbar ist nur die angelegte
-  const gear = {
-    heavy:  group(mesh(PARTS.guard, MATS.cloth), mesh(PARTS.blade, MATS.steel)),
-    dagger: group(mesh(PARTS.hilt, MATS.leather), mesh(PARTS.knife, MATS.steel)),
-    bow:    group(mesh(PARTS.bow, MATS.wood), mesh(PARTS.string, MATS.string)),
-    iron_sword:  group(mesh(PARTS.guard, MATS.cloth), mesh(PARTS.blade, MATS.iron)),
-    iron_dagger: group(mesh(PARTS.hilt, MATS.leather), mesh(PARTS.knife, MATS.iron)),
-    longbow:     group(mesh(PARTS.bow, MATS.darkwood), mesh(PARTS.string, MATS.string)),
-  };
-  const armR = joint(0.42, 1.5, 0.04, mesh(PARTS.armR, MATS.skin),
-    gear.heavy, gear.dagger, gear.bow, gear.iron_sword, gear.iron_dagger, gear.longbow);
-  armR.rotation.x = ARM_REST;
-
-  const tag = makeNameTag(name);
-  root.add(tag);
-  root.userData = {
-    body, legL, legR, armL, armR, tunic, tag, gear,
-    w: 'heavy', walk: 0, amp: 0, swing: -1, cast: -1, ko: false, koT: 0,
-  };
-  setWeaponModel(root, 'heavy');
-  scene.add(root);
-  return root;
-}
-
-function setWeaponModel(model, w) {
-  const u = model.userData;
-  if (!u.gear[w]) return;
-  u.w = w;
-  for (const k in u.gear) u.gear[k].visible = k === w;
-}
-
-function disposeCharacter(root) {
-  scene.remove(root);
-  const u = root.userData;
-  u.tunic.dispose();
-  u.tag.material.map.dispose();
-  u.tag.material.dispose();
-}
-
-// Armbewegung je Waffe: p läuft von 0 bis 1, -1 heißt Ruhe
-const REST = { heavy: ARM_REST, dagger: ARM_REST, bow: 0.35 };
-function swingAngle(p, w) {
-  const rest = REST[w] || ARM_REST;
-  if (p < 0) return rest;
-  if (w === 'bow') {                  // anlegen, zielen, zurück
-    if (p < 0.25) return lerp(rest, -0.05, smooth(p / 0.25));
-    if (p < 0.6) return -0.05;
-    return lerp(-0.05, rest, smooth((p - 0.6) / 0.4));
-  }
-  if (w === 'dagger') {               // schneller Stich nach vorn
-    if (p < 0.35) return lerp(rest, 0.05, smooth(p / 0.35));
-    return lerp(0.05, rest, smooth((p - 0.35) / 0.65));
-  }
-  if (p < 0.3) return lerp(rest, -1.3, smooth(p / 0.3));      // ausholen, zuschlagen, zurück
-  if (p < 0.55) return lerp(-1.3, 1.25, smooth((p - 0.3) / 0.25));
-  return lerp(1.25, rest, smooth((p - 0.55) / 0.45));
-}
-
-function castAngle(p) {               // der linke Arm hebt sich zum Zauber
-  if (p < 0) return null;
-  if (p < 0.3) return lerp(0, -1.5, smooth(p / 0.3));
-  if (p < 0.65) return -1.5;
-  return lerp(-1.5, 0, smooth((p - 0.65) / 0.35));
-}
-
-function animateCharacter(model, x, z, ry, speed, dt) {
-  const u = model.userData;
-  model.position.set(x, groundY(x, z), z);
-  model.rotation.y = lerpAngle(model.rotation.y, ry, damp(14, dt));
-
-  // Bewusstlos: der Körper kippt nach hinten und bleibt liegen
-  u.koT = lerp(u.koT, u.ko ? 1 : 0, damp(6, dt));
-  const down = smooth(clamp(u.koT, 0, 1));
-  u.body.rotation.x = -Math.PI / 2 * down;
-
-  // Laufen: Beine und linker Arm schwingen, der Körper wippt
-  const target = !u.ko && speed > 0.3 ? Math.min(speed / RULES.speed, 1) : 0;
-  u.amp = lerp(u.amp, target, damp(10, dt));
-  if (target > 0) u.walk += dt * (5 + speed * 1.4);
-  const s = Math.sin(u.walk);
-  u.legL.rotation.x = s * 0.7 * u.amp;
-  u.legR.rotation.x = -s * 0.7 * u.amp;
-  u.body.position.y = Math.abs(s) * 0.08 * u.amp + down * 0.3;
-
-  if (u.swing >= 0) {
-    u.swing += dt / (u.w === 'dagger' ? 0.3 : 0.4);
-    if (u.swing >= 1) u.swing = -1;
-  }
-  u.armR.rotation.x = swingAngle(u.swing, u.w);
-
-  if (u.cast >= 0) {
-    u.cast += dt / 0.6;
-    if (u.cast >= 1) u.cast = -1;
-  }
-  const c = castAngle(u.cast);
-  u.armL.rotation.x = c === null ? -s * 0.5 * u.amp : c;
 }
 
 // ===========================================================================

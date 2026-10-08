@@ -5,7 +5,7 @@
 
 // ---- Spielzustand ----
 const me = {
-  id: null, x: 0, z: 0, ry: 0, model: null, ko: false, koUntil: 0,
+  id: null, x: 0, z: 0, ry: 0, model: null, ko: false, koUntil: 0, name: '', color: 0x8c6a4a, look: null,
   // Werte, die nur der Server festlegt – bis zur Verbindung mit Startwerten gefüllt
   self: {
     hp: 100, hpMax: 100, mana: 60, manaMax: 60, weapon: 'heavy', ko: false,
@@ -20,9 +20,12 @@ let camYaw = 0, camPitch = 0.42, camDist = 9;
 const camTarget = new THREE.Vector3();
 const tmpV = new THREE.Vector3();
 
-function setMe(name, color) {
+function setMe(name, color, look) {
+  me.name = name;
+  me.color = color;
+  me.look = look || null;
   if (me.model) disposeCharacter(me.model);
-  me.model = makeCharacter(color, name);
+  me.model = makeCharacter(color, name, look);
   me.model.position.set(me.x, groundY(me.x, me.z), me.z);
   me.model.rotation.y = me.ry;
   me.model.userData.ko = me.ko;
@@ -32,12 +35,37 @@ function setMe(name, color) {
 
 function addOther(p) {
   if (p.id === me.id || others.has(p.id)) return;
-  const model = makeCharacter(p.color, p.name);
+  const model = makeCharacter(p.color, p.name, p.look);
   model.position.set(p.x, groundY(p.x, p.z), p.z);
   model.rotation.y = p.ry;
   model.userData.ko = !!p.ko;
   setWeaponModel(model, p.w || 'heavy');
-  others.set(p.id, { name: p.name, model, x: p.x, z: p.z, tx: p.x, tz: p.z, ry: p.ry });
+  others.set(p.id, { name: p.name, color: p.color, look: p.look, model, x: p.x, z: p.z, tx: p.x, tz: p.z, ry: p.ry });
+}
+
+// Neues Aussehen: Figur neu bauen, Lage, Waffe und Zustand übernehmen
+function applyLook(id, look) {
+  if (id === me.id) {
+    const keep = me.model;
+    const w = me.self.weapon;
+    setMe(me.name, me.color, look);
+    if (keep) { me.model.rotation.y = keep.rotation.y; me.model.userData.koT = keep.userData.koT; }
+    setWeaponModel(me.model, w);
+    if (typeof onOwnLook === 'function') onOwnLook();
+    return;
+  }
+  const o = others.get(id);
+  if (!o) return;
+  const old = o.model;
+  const model = makeCharacter(o.color, o.name, look);
+  model.position.copy(old.position);
+  model.rotation.y = old.rotation.y;
+  model.userData.ko = old.userData.ko;
+  model.userData.koT = old.userData.koT;
+  setWeaponModel(model, old.userData.w);
+  disposeCharacter(old);
+  o.model = model;
+  o.look = look;
 }
 
 function removeOther(id) {
@@ -218,6 +246,7 @@ function connect() {
 
 // Spielwelt verlassen (Abmelden, woanders angemeldet, Verbindung weg)
 function leaveGame() {
+  if (typeof openLook === 'function') openLook(false);   // Kamera zurück
   me.id = null;
   clearOthers();
   clearCreatures();
@@ -245,6 +274,9 @@ const login = {
   fresh: document.getElementById('login-new'),
   resume: document.getElementById('login-resume'),
   warn: document.getElementById('login-warn'),
+  sexM: document.getElementById('login-sex-m'),
+  sexF: document.getElementById('login-sex-f'),
+  sex: 'm',
   busy: false,
 
   show(text = '', opts = {}) {
@@ -284,7 +316,7 @@ const login = {
     }
     this.error.textContent = '';
     this.setBusy(true);
-    sendMsg({ t: kind, name, pass });
+    sendMsg(kind === 'register' ? { t: kind, name, pass, look: { sex: this.sex } } : { t: kind, name, pass });
   },
 };
 
@@ -300,6 +332,14 @@ function resumeHere() {             // nach "woanders angemeldet" hier zurückho
   connect();
 }
 login.resume.addEventListener('click', resumeHere);
+// Geschlecht für einen neuen Charakter
+function pickSex(sex) {
+  login.sex = sex;
+  login.sexM.setAttribute('aria-pressed', String(sex === 'm'));
+  login.sexF.setAttribute('aria-pressed', String(sex === 'f'));
+}
+login.sexM.addEventListener('click', () => pickSex('m'));
+login.sexF.addEventListener('click', () => pickSex('f'));
 
 function onAuthMessage(msg) {
   switch (msg.t) {
@@ -367,7 +407,7 @@ function onMessage(msg) {
       me.ko = !!msg.self.ko;
       net.corr = 0;
       net.sent = { x: Infinity, z: Infinity, ry: Infinity };
-      setMe(you.name, you.color);
+      setMe(you.name, you.color, you.look);
       clearOthers();
       msg.players.forEach(addOther);
       clearCreatures();
@@ -422,6 +462,9 @@ function onMessage(msg) {
       break;
     case 'pong':
       net.ping = Math.round(performance.now() - msg.ts);
+      break;
+    case 'look':                    // jemand hat sein Aussehen geändert
+      applyLook(msg.id, msg.look);
       break;
     case 'admin':                   // Antwort auf einen Verwaltungs-Befehl → admin.js
       onAdminMessage(msg);

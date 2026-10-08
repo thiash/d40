@@ -20,6 +20,20 @@ Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.
   Startplatzes steht eine Truhe, die jeder Charakter für sich nutzt – ihr Inhalt
   übersteht später auch die Wiedergeburt. Tasche und Truhe werden gespeichert.
 
+### Figuren
+
+Jede Figur hat ein Skelett mit Hüfte, Wirbelsäule, Brust, Hals, Kopf, Schultern, Ellbogen,
+Händen, Knien und Füßen, dazu ein Gesicht (Augen mit Blinzeln, Brauen, Nase, Mund, Ohren),
+Haare, Tunika, Gürtel, Hose, Stiefel und Rucksack. Männlich oder weiblich, fünf Hauttöne,
+sechs Haarfarben, je drei Frisuren, beim Mann auf Wunsch ein Bart. Das Geschlecht wählt man
+beim Anlegen, alles andere unter **Werte → Aussehen ändern**. Der Server prüft und speichert
+das Aussehen und gibt es an alle weiter.
+
+Bewegungen: Atmen und Gewicht verlagern im Stand, Gehen und Rennen (fließend je nach Tempo),
+Schwerthieb mit Ausholen über die Schulter, Dolchstich mit Ausfallschritt, Bogen spannen mit
+Pfeil und Sehne an der Hand, Zauber mit offener Hand, kurzer Ruck bei Treffern, Fallen bei
+Bewusstlosigkeit. Schwert und Dolch liegen in der rechten Hand, der Bogen in der linken.
+
 ## Steuerung
 
 - Handy: Joystick links, rechts wischen dreht die Kamera, Knöpfe rechts für Angriff,
@@ -82,7 +96,9 @@ Eine echte Datenbank ist dafür nicht nötig.
 
 ```
 client/index.html   Aussehen, Bedienelemente, Anmeldeformular, Spielschleife
-client/world.js     Welt, Landschaft, Figuren, Tiere, Beutesäcke und Truhe
+client/world.js     Welt, Landschaft, Namensschilder, Tiere, Beutesäcke und Truhe
+client/character.js Spielfiguren: Körper, Gesicht, Haare, Kleidung, Waffen, Animation
+client/look.js      Aussehen wählen
 client/net.js       Steuerung, Netzwerk und Anmeldung
 client/combat.js    Kampf, Anzeigen, Werte-Tafel, Effekte
 client/items.js     Beute, Tasche, Truhe, Last-Anzeige
