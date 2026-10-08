@@ -491,12 +491,23 @@ async function handleAuth(conn, msg) {
 // Administrator-Figur: Suchen, Gegenstand geben, Sperren, Sichtbarkeit.
 // Jede Aktion prüft hier das Kennzeichen des Servers – die Oberfläche entscheidet nichts.
 // ---------------------------------------------------------------------------
+const adminLog = [];                 // die letzten Verwaltungs-Aktionen (nur im Arbeitsspeicher)
+function adminRecord(by, text) {
+  adminLog.push({ at: new Date().toISOString(), by, text });
+  if (adminLog.length > 50) adminLog.shift();
+  log(`Verwaltung: ${text}`);
+}
+
 async function handleAdmin(p, msg) {
   if (!p.admin) return;
   const reply = (ok, text, extra = {}) => send(p, { t: 'admin', op: msg.op, ok, text, ...extra });
   const who = typeof msg.name === 'string' ? msg.name.trim().replace(/\s+/g, ' ').slice(0, 16) : '';
   const key = who.toLowerCase();
   const isOnline = (id) => [...players.values()].some((q) => q.accountId === id);
+
+  if (msg.op === 'log') {
+    return send(p, { t: 'admin', op: 'log', ok: true, entries: adminLog.slice().reverse() });
+  }
 
   if (msg.op === 'search') {
     const rows = await db.searchAccounts(key);
@@ -515,7 +526,7 @@ async function handleAdmin(p, msg) {
       broadcast({ t: 'leave', id: p.id }, p.id);   // zuerst gehen, dann unsichtbar
       p.hidden = true;
     }
-    log(`Verwaltung: ${p.name} ist jetzt ${show ? 'sichtbar' : 'unsichtbar'}`);
+    adminRecord(p.name, `${p.name} ist jetzt ${show ? 'sichtbar' : 'unsichtbar'}`);
     return reply(true, show ? 'Du bist wieder sichtbar.' : 'Du bist jetzt unsichtbar.', { hidden: p.hidden });
   }
 
@@ -538,7 +549,7 @@ async function handleAdmin(p, msg) {
       data.inv = inv;
       await db.saveCharacter(acc.id, data);
     }
-    log(`Verwaltung: ${p.name} gibt ${acc.name} ${n} × ${k}`);
+    adminRecord(p.name, `${p.name} gibt ${acc.name} ${n} × ${k}`);
     return reply(true, `${n} × ${ITEMS[k].name} an ${acc.name} gegeben.`);
   }
 
@@ -555,7 +566,7 @@ async function handleAdmin(p, msg) {
         online.ws.close(4003, 'banned');
       }
     }
-    log(`Verwaltung: ${p.name} ${on ? 'sperrt' : 'entsperrt'} ${acc.name}`);
+    adminRecord(p.name, `${p.name} ${on ? 'sperrt' : 'entsperrt'} ${acc.name}`);
     return reply(true, on ? `${acc.name} ist gesperrt.` : `${acc.name} ist wieder frei.`, { name: acc.name, banned: on });
   }
 }

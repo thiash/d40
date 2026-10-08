@@ -9,6 +9,7 @@ const adminUi = {
   panel: document.getElementById('admin'),
   name: document.getElementById('admin-name'),
   search: document.getElementById('admin-search'),
+  logBtn: document.getElementById('admin-log-btn'),
   results: document.getElementById('admin-results'),
   item: document.getElementById('admin-item'),
   n: document.getElementById('admin-n'),
@@ -89,9 +90,34 @@ function renderAdminResults(list) {
 }
 
 // Antworten des Servers auf Verwaltungs-Befehle
+function renderAdminLog(entries) {
+  clearEl(adminUi.results);
+  if (!entries.length) {
+    adminUi.results.appendChild(emptyNote('Noch keine Aktionen seit dem letzten Neustart des Servers.'));
+    return;
+  }
+  for (const e of entries) {
+    const row = document.createElement('div');
+    row.className = 'item';
+    const text = document.createElement('span');
+    text.className = 'name';
+    text.textContent = e.text;
+    const when = document.createElement('span');
+    when.className = 'kg';
+    when.textContent = new Date(e.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    row.appendChild(text);
+    row.appendChild(when);
+    adminUi.results.appendChild(row);
+  }
+}
+
 function onAdminMessage(msg) {
   if (msg.op === 'search') {
     renderAdminResults(msg.results || []);
+    return true;
+  }
+  if (msg.op === 'log') {
+    renderAdminLog(msg.entries || []);
     return true;
   }
   adminUi.note.textContent = msg.text || '';
@@ -109,6 +135,7 @@ function onAdminMessage(msg) {
 adminUi.btn.addEventListener('click', () => adminOpen(adminUi.panel.hidden));
 adminUi.close.addEventListener('click', () => adminOpen(false));
 adminUi.search.addEventListener('click', () => sendAdmin('search', { name: adminUi.name.value }));
+adminUi.logBtn.addEventListener('click', () => sendAdmin('log'));
 adminUi.give.addEventListener('click', () => {
   const n = Math.floor(Number(adminUi.n.value));
   if (!(n >= 1)) { adminUi.note.textContent = 'Bitte eine Anzahl von 1 oder mehr eingeben.'; return; }
