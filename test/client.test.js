@@ -363,6 +363,8 @@ function makeEl(id, hidden = false) {
   await pump(150);
   ok('Weggehen schließt das Lagerfeuer-Menü', el('craft').hidden === true);
 
+  ok('Gebäude blockieren im Client wie im Server', ev('inBuilding(-24, -16)') === true && ev('inBuilding(0, 0)') === false);
+
   // ---- Abmelden ----
   const before = { ...P().a };
   el('logout').dispatch('click');

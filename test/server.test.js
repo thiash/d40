@@ -847,6 +847,17 @@ function get(port, urlPath) {
     a.p.inv = {};
   });
 
+  await safely('Gebäude sind Hindernisse', async () => {
+    ok('Haus und Schmiede sind Hindernisse, die Straße nicht',
+      S.inBuilding(-24, -16) && S.inBuilding(S.FORGE.x, S.FORGE.z) && !S.inBuilding(0, 0) && !S.inBuilding(-20, -16));
+    a.p.x = -21.5; a.p.z = -16;                      // vor der Hauswand
+    a.p.budget = 3; a.p.lastMoveAt = Date.now();
+    const from = a.mark();
+    a.send({ t: 'move', x: -22.6, z: -16, ry: 0, c: a.p.corr });   // hinein in die Wand
+    const c = await a.waitFor((x) => x.t === 'correct', 2000, from);
+    ok('Server lässt niemanden durch die Mauer laufen', !!c && a.p.x === -21.5);
+  });
+
   await safely('Statusseite', async () => {
     const st = await getJson('/status');
     ok('/status zeigt den Speicherweg ohne Geheimnisse', st && /Arbeitsspeicher/.test(st.speichern)

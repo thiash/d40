@@ -106,6 +106,15 @@ const CRAFT = {
 const FOOD = { meat: { heal: 15 }, grilled_meat: { heal: 30 } };
 const FORGE = { x: -14, z: -8, reach: 3 };    // Schmiede im Dorf neben dem Startplatz
 const FIRE = { x: 14, z: -8, reach: 3 };      // Lagerfeuer zum Grillen
+// Gebäude sind feste Hindernisse – dieselbe Liste wie im Client (world.js)
+const BUILDINGS = [
+  { x: FORGE.x, z: FORGE.z, w: 4, d: 3.4, h: 2.4 },
+  { x: -24, z: -16, w: 3, d: 2.6, h: 2.2 },
+  { x: 10, z: -20, w: 2.6, d: 2.4, h: 2 },
+];
+const BUILDING_PAD = 0.35;
+const inBuilding = (x, z) => BUILDINGS.some((b) =>
+  Math.abs(x - b.x) < b.w / 2 + BUILDING_PAD && Math.abs(z - b.z) < b.d / 2 + BUILDING_PAD);
 const own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
 // Was ein besiegtes Tier fallen lässt: Chance p, Anzahl zwischen n[0] und n[1]
 const DROPS = {
@@ -131,7 +140,7 @@ const RULES = {                    // geht beim Verbinden an den Client
   reviveMs: COMBAT.reviveMs,
   weapons: Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, w.name])),
   craft: Object.fromEntries(Object.entries(CRAFT).map(([k, r]) => [k, r.cost])),
-  food: FOOD, forge: FORGE, fire: FIRE,
+  food: FOOD, forge: FORGE, fire: FIRE, buildings: BUILDINGS,
   spells: Object.fromEntries(Object.entries(SPELLS).map(([k, s]) => [k, { name: s.name, cost: s.cost }])),
   enemies: Object.fromEntries(Object.entries(ENEMY_KINDS).map(([k, e]) => [k, e.name])),
   items: ITEMS,
@@ -632,7 +641,7 @@ function handleMove(p, msg) {
 
   const d = Math.hypot(x - p.x, z - p.z);
   const outside = Math.abs(x) > RULES.worldHalf || Math.abs(z) > RULES.worldHalf;
-  if (d > p.budget || outside) {
+  if (d > p.budget || outside || inBuilding(x, z)) {     // durch Mauern geht niemand
     p.corr++;
     send(p, { t: 'correct', n: p.corr, x: r2(p.x), z: r2(p.z) });
     return;
@@ -1193,7 +1202,7 @@ if (require.main === module) {
 // Für die automatischen Tests
 module.exports = {
   start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding,
   carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,
