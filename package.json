@@ -1,8 +1,18 @@
 {
   "name": "d40",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
-  "scripts": { "start": "node server/index.js", "dev": "node --watch server/index.js" },
-  "engines": { "node": ">=18" },
-  "dependencies": { "ws": "^8.18.0" }
+  "description": "Browser-MMORPG für Smartphones – Server und Client",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node test/server.test.js && node test/store.test.js && node test/client.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
 }

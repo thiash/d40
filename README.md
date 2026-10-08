@@ -20,12 +20,15 @@ Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.
 - PC: WASD laufen, Maus ziehen dreht die Kamera, Mausrad zoomt,
   Leertaste angreifen, Q Waffe, E Zauber, R heilen, C Werte.
 
-## Datenbank
+## Betrieb (Render und Neon)
 
-Gespeichert wird in einer Postgres-Datenbank (zum Beispiel kostenlos bei Neon).
-Der Server liest ihre Adresse aus der Umgebungsvariable `DATABASE_URL`
+Das Spiel läuft auf **Render** (Build `npm install`, Start `npm start`).
+Gespeichert wird in einer Postgres-Datenbank bei **Neon**. Beide arbeiten zusammen:
+Render führt den Server aus, Neon ist sein Gedächtnis.
+
+Der Server liest die Adresse der Datenbank aus der Umgebungsvariable `DATABASE_URL`
 (bei Render unter **Environment**). Die Adresse enthält das Datenbank-Passwort:
-Sie gehört nie ins Repository.
+Sie gehört nie ins Repository und in keinen Chat.
 
 Ohne `DATABASE_URL` läuft das Spiel trotzdem, speichert aber nur im Arbeitsspeicher –
 nach einem Neustart ist alles weg. Ein zusätzliches Paket ist nicht nötig: Der Server
@@ -41,7 +44,22 @@ npm install
 npm start
 ```
 
-Dann im Browser `http://localhost:3000` öffnen. Jedes Browserfenster ist ein eigener Spieler.
+Dann im Browser `http://localhost:3000` öffnen.
+
+Zum Testen mit mehreren Spielern braucht jeder Spieler einen eigenen Charakter.
+Das Gerät merkt sich die Anmeldung pro Browser. Ein zweiter Tab im selben Browser
+meldet denselben Charakter an und wirft den ersten hinaus. Für einen zweiten Spieler
+dient deshalb ein privates Fenster oder ein anderer Browser mit einem anderen Namen.
+
+## Tests
+
+```bash
+npm test
+```
+
+Startet den echten Server und spielt mit echten und simulierten Clients durch:
+Kampf, Lernen, Anmeldung, Speichern, Neustart und Datenbank-Aussetzer.
+Eine echte Datenbank ist dafür nicht nötig.
 
 ## Projektstruktur
 
@@ -52,4 +70,5 @@ client/net.js       Steuerung, Netzwerk und Anmeldung
 client/combat.js    Kampf, Anzeigen, Werte-Tafel, Effekte
 server/index.js     Spielserver: Anmeldung, Bewegung, Kampf, Tiere, Speichertakt
 server/store.js     Speicher: Konten, Charaktere, Passwörter (scrypt), Datenbank
+test/               Automatische Tests für Server, Datenbank und Client
 ```

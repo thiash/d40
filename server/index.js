@@ -235,11 +235,14 @@ function log(text) {
 // Verbindung: erst anmelden, dann spielen
 // ---------------------------------------------------------------------------
 function clientIp(req) {
-  // Hinter Render steht ein Proxy: Die echte Adresse hängt er hinten an X-Forwarded-For an.
+  // Hinter Render steht ein Proxy, der seine eigene Adresse ans Ende von X-Forwarded-For anhängt.
+  // Der Spieler steht also vor dem letzten Eintrag. Alles weiter vorn kann ein Spieler selbst
+  // mitschicken und zählt deshalb nicht. Gäbe es nur einen Eintrag, ist es die Adresse des Spielers.
   const fwd = req && req.headers && req.headers['x-forwarded-for'];
   if (typeof fwd === 'string') {
     const parts = fwd.split(',').map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
+    if (parts.length >= 2) return parts[parts.length - 2];
+    if (parts.length === 1) return parts[0];
   }
   return (req && req.socket && req.socket.remoteAddress) || '?';
 }
