@@ -101,7 +101,15 @@ class MemoryStore {
     this.accounts = new Map();               // name_key → { id, name, pass }
     this.characters = new Map();             // id → JSON-Text
     this.sessions = new Map();               // token_hash → { id, lastUsed }
+    this.adminLog = [];                      // { at, by, text }, älteste zuerst
     this.nextId = 1;
+  }
+  async addAdminLog(by, text) {
+    this.adminLog.push({ at: new Date().toISOString(), by, text });
+    if (this.adminLog.length > 500) this.adminLog.shift();
+  }
+  async listAdminLog(limit = 50) {             // neueste zuerst
+    return this.adminLog.slice(-limit).reverse().map((e) => ({ ...e }));
   }
   async init() {}
   async findAccount(key) {
@@ -187,6 +195,12 @@ const SCHEMA = [
      last_used TIMESTAMPTZ NOT NULL DEFAULT now()
    )`,
   'CREATE INDEX IF NOT EXISTS d40_sessions_account ON d40_sessions (account_id)',
+  `CREATE TABLE IF NOT EXISTS d40_admin_log (
+     id BIGSERIAL PRIMARY KEY,
+     at TIMESTAMPTZ NOT NULL DEFAULT now(),
+     by_name TEXT NOT NULL,
+     text TEXT NOT NULL
+   )`,
 ];
 
 const SQL = {
@@ -198,6 +212,9 @@ const SQL = {
   createAccount: 'INSERT INTO d40_accounts (name, name_key, pass) VALUES ($1, $2, $3) '
     + 'ON CONFLICT (name_key) DO NOTHING RETURNING id::text AS id',
   touchAccount: 'UPDATE d40_accounts SET last_login = now() WHERE id = $1::bigint',
+  addAdminLog: 'INSERT INTO d40_admin_log (by_name, text) VALUES ($1, $2)',
+  listAdminLog: 'SELECT (extract(epoch FROM at) * 1000)::bigint::text AS at_ms, by_name, text FROM d40_admin_log '
+    + 'ORDER BY id DESC LIMIT $1::bigint',
   loadCharacter: 'SELECT data::text AS data FROM d40_characters WHERE account_id = $1::bigint',
   saveCharacter: 'INSERT INTO d40_characters (account_id, data, updated_at) VALUES ($1::bigint, $2::jsonb, now()) '
     + 'ON CONFLICT (account_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()',
@@ -426,6 +443,13 @@ class SqlStore {
   }
   async touchAccount(id) {
     await this.q(SQL.touchAccount, [id]);
+  }
+  async addAdminLog(by, text) {
+    await this.q(SQL.addAdminLog, [by, text]);
+  }
+  async listAdminLog(limit = 50) {             // neueste zuerst
+    const rows = await this.q(SQL.listAdminLog, [limit]);
+    return rows.map((r) => ({ at: new Date(Number(r.at_ms)).toISOString(), by: r.by_name, text: r.text }));
   }
   async loadCharacter(id) {
     const [row] = await this.q(SQL.loadCharacter, [id]);

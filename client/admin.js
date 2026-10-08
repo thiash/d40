@@ -104,7 +104,10 @@ function renderAdminLog(entries) {
     text.textContent = e.text;
     const when = document.createElement('span');
     when.className = 'kg';
-    when.textContent = new Date(e.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    const d = new Date(e.at);
+    const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    when.textContent = d.toDateString() === new Date().toDateString()
+      ? time : `${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} ${time}`;
     row.appendChild(text);
     row.appendChild(when);
     adminUi.results.appendChild(row);

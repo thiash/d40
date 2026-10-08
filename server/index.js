@@ -510,11 +510,14 @@ async function handleAuth(conn, msg) {
 // Administrator-Figur: Suchen, Gegenstand geben, Sperren, Sichtbarkeit.
 // Jede Aktion prüft hier das Kennzeichen des Servers – die Oberfläche entscheidet nichts.
 // ---------------------------------------------------------------------------
-const adminLog = [];                 // die letzten Verwaltungs-Aktionen (nur im Arbeitsspeicher)
+// Verwaltungs-Protokoll: dauerhaft in der Datenbank. Die letzten Einträge liegen
+// zusätzlich im Arbeitsspeicher – falls die Datenbank gerade nicht antwortet.
+const adminLog = [];
 function adminRecord(by, text) {
   adminLog.push({ at: new Date().toISOString(), by, text });
   if (adminLog.length > 50) adminLog.shift();
   log(`Verwaltung: ${text}`);
+  db.addAdminLog(by, text).catch((err) => log(`Protokoll nicht gespeichert: ${db.describe(err)}`));
 }
 
 async function handleAdmin(p, msg) {
@@ -525,7 +528,14 @@ async function handleAdmin(p, msg) {
   const isOnline = (id) => [...players.values()].some((q) => q.accountId === id);
 
   if (msg.op === 'log') {
-    return send(p, { t: 'admin', op: 'log', ok: true, entries: adminLog.slice().reverse() });
+    let entries;
+    try {
+      entries = await db.listAdminLog(50);
+    } catch (err) {
+      log(`Protokoll nicht gelesen: ${db.describe(err)}`);
+      entries = adminLog.slice().reverse();
+    }
+    return send(p, { t: 'admin', op: 'log', ok: true, entries });
   }
 
   if (msg.op === 'search') {

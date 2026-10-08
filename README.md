@@ -19,12 +19,19 @@ Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.
   Anderthalbfachen geht nichts mehr. Abgelegtes gehört sofort allen. In der Mitte des
   Startplatzes steht eine Truhe, die jeder Charakter für sich nutzt – ihr Inhalt
   übersteht später auch die Wiedergeburt. Tasche und Truhe werden gespeichert.
+- **Dorf:** In der Schmiede entstehen aus Beute neue Waffen (Eisenschwert, Eisendolch,
+  Langbogen). Schmieden dauert drei Sekunden; wer sich vorher entfernt, bricht ab und
+  behält seine Zutaten. Am Lagerfeuer wird Wildfleisch gegrillt – gegrillt heilt es doppelt.
 
 ### Figuren
 
 Jede Figur hat ein Skelett mit Hüfte, Wirbelsäule, Brust, Hals, Kopf, Schultern, Ellbogen,
-Händen, Knien und Füßen, dazu ein Gesicht (Augen mit Blinzeln, Brauen, Nase, Mund, Ohren),
-Haare, Tunika, Gürtel, Hose, Stiefel und Rucksack. Männlich oder weiblich, fünf Hauttöne,
+Händen, Knien und Füßen. Der Kopf ist modelliert statt rund: Stirn, Brauenbogen,
+Augenhöhlen, Nase mit Nasenflügeln, Wangenknochen, Lippen, Kinn und eine Kieferkante; das
+Frauengesicht ist zierlicher. Die Augen haben Iris, Pupille und Lider, die beim Blinzeln
+zugehen. Haare und Bart liegen als Schicht auf der Kopfform und laufen am Ansatz weich aus.
+Rumpf und Glieder haben Muskelformen, die Hände sind Fäuste. Dazu Tunika, Gürtel, Hose,
+Stiefel und Rucksack. Männlich oder weiblich, fünf Hauttöne,
 sechs Haarfarben, je drei Frisuren, beim Mann auf Wunsch ein Bart. Das Geschlecht wählt man
 beim Anlegen, alles andere unter **Werte → Aussehen ändern**. Der Server prüft und speichert
 das Aussehen und gibt es an alle weiter.
@@ -67,6 +74,10 @@ die Umgebungsvariable `ADMIN_NAMES` (bei Render unter **Environment**), mit Komm
 Charakternamen, zum Beispiel `Creator`. Gleichgültig ob Groß- oder Kleinschreibung.
 Den Charakter legt man ganz normal im Spiel an. Wird der Name aus der Liste entfernt,
 verliert er die Rechte beim nächsten Anmelden.
+
+Jede Verwaltungs-Aktion (Gegenstand geben, sperren, sichtbar/unsichtbar) steht im
+Protokoll. Es liegt in der Datenbank (Tabelle `d40_admin_log`) und bleibt über Neustarts
+erhalten; die Verwaltung zeigt die letzten 50 Einträge.
 
 ## Starten am eigenen Rechner (Node.js 18 oder neuer)
 

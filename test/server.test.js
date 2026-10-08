@@ -915,6 +915,8 @@ function get(port, urlPath) {
     const lg = await a.waitFor((x) => x.t === 'admin' && x.op === 'log', 2000, from);
     ok('Protokoll zeigt die Aktionen, neueste zuerst', lg.entries.length >= 4 && /sperrt Testopfer/.test(lg.entries[0].text)
       && lg.entries.some((e) => /gibt/.test(e.text)) && lg.entries[0].by === a.p.name);
+    const stored = await S.getStore().listAdminLog(50);
+    ok('Protokoll wird im Speicher abgelegt (mit Datenbank: dauerhaft)', stored.length >= 4 && /sperrt Testopfer/.test(stored[0].text));
     a.p.admin = false;
     from = a.mark();
     a.send({ t: 'admin', op: 'give', name: a.p.name, k: 'meat', n: 1 });
