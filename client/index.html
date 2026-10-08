@@ -122,13 +122,20 @@
   .empty { margin: 4px 0 2px; font-size: 14px; line-height: 1.4; color: var(--bone-dim); font-style: italic; }
 
   /* Truhe: in der Mitte, Truheninhalt oben, Tasche unten */
-  #chest {
+  #chest, #craft {
     position: fixed; left: 50%; top: calc(var(--sat) + 52px); transform: translateX(-50%);
     width: min(calc(100vw - 24px), 360px); max-height: calc(100vh - var(--sat) - var(--sab) - 200px);
     overflow-y: auto; padding: 14px 16px 14px; border-radius: 14px; z-index: 5;
     background: rgba(31, 43, 34, 0.92); border: 1px solid rgba(201, 162, 74, 0.55); touch-action: pan-y;
   }
-  #chest h2 { margin: 0 0 4px; font: 700 20px/1.2 var(--display); letter-spacing: 0.05em; color: var(--brass); }
+  #craft .item .cost { color: var(--bone-dim); font-size: 13px; }
+  #craft .item button:disabled { opacity: 0.4; cursor: default; }
+  #chest h2, #craft h2 { margin: 0 0 4px; font: 700 20px/1.2 var(--display); letter-spacing: 0.05em; color: var(--brass); }
+  #craft-close {
+    display: block; width: 100%; margin-top: 14px; padding: 9px 0; border-radius: 9px; cursor: pointer;
+    background: transparent; border: 1px solid rgba(236, 227, 204, 0.3); color: var(--bone); font: 500 15px/1.2 var(--sans);
+  }
+  #craft-close:focus-visible { outline: 3px solid var(--bone); outline-offset: 2px; }
   #chest h3 { margin: 14px 0 4px; font-size: 14px; font-weight: 500; color: var(--bone-dim); }
   #chest-close {
     display: block; width: 100%; margin-top: 14px; padding: 9px 0; border-radius: 9px; cursor: pointer;
@@ -145,7 +152,7 @@
     box-shadow: 0 6px 16px rgba(20, 28, 22, 0.45);
   }
   #use:focus-visible { outline: 3px solid var(--bone); outline-offset: 4px; }
-  #bag[hidden], #chest[hidden], #use[hidden] { display: none; }
+  #bag[hidden], #chest[hidden], #craft[hidden], #use[hidden] { display: none; }
   @media (max-width: 430px) {            /* schmale Handys: oben ist es eng */
     #status { gap: 8px; padding-right: 12px; }
     #status .ping { display: none; }
@@ -326,7 +333,7 @@
 
   /* Während der Anmeldung ist nur das Formular zu sehen – steht am Ende, damit es alles andere überstimmt */
   body.login-open #attack, body.login-open .act, body.login-open #corner, body.login-open #stats,
-  body.login-open #bag, body.login-open #chest, body.login-open #use,
+  body.login-open #bag, body.login-open #chest, body.login-open #craft, body.login-open #use,
   body.login-open #vitals, body.login-open #hint, body.login-open #stick, body.login-open #log { display: none; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -385,6 +392,12 @@
     <h3 id="chest-load">In deiner Tasche</h3>
     <div id="chest-bag"></div>
     <button id="chest-close" type="button">Schließen</button>
+  </section>
+  <section id="craft" aria-label="Schmiede und Feuer" hidden>
+    <h2 id="craft-title">Schmiede</h2>
+    <p id="craft-note" class="empty"></p>
+    <div id="craft-list"></div>
+    <button id="craft-close" type="button">Schließen</button>
   </section>
   <button id="use" type="button" hidden><span id="use-label"></span></button>
   <section id="stats" class="glass" aria-label="Charakterwerte" hidden>

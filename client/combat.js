@@ -5,19 +5,26 @@
 //  eingegeben und angezeigt.
 // ===========================================================================
 
-const WEAPON_ORDER = ['heavy', 'dagger', 'bow'];
+const WEAPON_ORDER = ['heavy', 'dagger', 'bow', 'iron_sword', 'iron_dagger', 'longbow'];
+const CRAFTED_WEAPONS = ['iron_sword', 'iron_dagger', 'longbow'];   // nur mit dem Gegenstand in der Tasche
 const ATTR_NAMES = { str: 'Stärke', sta: 'Ausdauer', agi: 'Beweglichkeit', int: 'Intelligenz', wis: 'Weisheit' };
 const DEFEATED = { hare: 'einen Hasen', wolf: 'einen Wolf', boar: 'einen Keiler' };
 const DRAW = {
   heavy: 'Du ziehst das Schwert.',
   dagger: 'Du ziehst den Dolch.',
   bow: 'Du nimmst den Bogen zur Hand.',
+  iron_sword: 'Du ziehst das Eisenschwert.',
+  iron_dagger: 'Du ziehst den Eisendolch.',
+  longbow: 'Du nimmst den Langbogen zur Hand.',
 };
 const ICONS = {
   heavy: '<path d="M8 16 L19.5 4.5"/><path d="M5.5 13.5 L10.5 18.5"/><path d="M8 16 L4.5 19.5"/>',
   dagger: '<path d="M12 3 L14.2 9.5 L12 15 L9.8 9.5 Z"/><path d="M8 15 H16"/><path d="M12 15 V21"/>',
   bow: '<path d="M8 3 Q20 12 8 21"/><path d="M8 3 V21"/><path d="M4 12 H17"/><path d="M14 9 L17 12 L14 15"/>',
 };
+ICONS.iron_sword = ICONS.heavy;
+ICONS.iron_dagger = ICONS.dagger;
+ICONS.longbow = ICONS.bow;
 
 const hud = {
   hpBar: document.getElementById('hp-bar'),
@@ -128,7 +135,9 @@ function castSpell(s) {
 
 function cycleWeapon() {
   if (me.ko) return;
-  const next = WEAPON_ORDER[(WEAPON_ORDER.indexOf(me.self.weapon) + 1) % WEAPON_ORDER.length];
+  // Nur Waffen, die man hat: Startwaffen immer, geschmiedete nur in der Tasche
+  const owned = WEAPON_ORDER.filter((k) => !CRAFTED_WEAPONS.includes(k) || (me.self.inv[k] || 0) > 0);
+  const next = owned[(owned.indexOf(me.self.weapon) + 1) % owned.length];
   me.self.weapon = next;            // sofort zeigen, der Server bestätigt gleich
   pendingWeapon = next;
   pendingAt = performance.now();

@@ -342,6 +342,27 @@ function makeEl(id, hidden = false) {
   ok('Weggehen schließt die Truhe', el('chest').hidden === true && el('use').hidden === true,
     `chest ${el('chest').hidden} use ${el('use').hidden} ${el('use-label').textContent} me ${ev('me.x')},${ev('me.z')} piles ${ev('lootPiles.size')}`);
 
+  // ---- Schritt 5: Schmiede und Lagerfeuer ----
+  teleport(-14, -8);
+  await pump(150);
+  ok('An der Schmiede: Knopf „Schmieden“', el('use').hidden === false && el('use-label').textContent === 'Schmieden');
+  el('use').dispatch('pointerdown');
+  await until(() => el('craft').hidden === false);
+  ok('Schmiede-Menü: drei Rezepte, Titel „Schmiede“', el('craft-title').textContent === 'Schmiede'
+    && el('craft-list').children.length === Object.keys(ev('RULES.craft')).length && el('craft-list').children.length === 3);
+  el('craft-close').dispatch('click');
+  ok('Schmiede-Menü schließt sich', el('craft').hidden === true && el('use-label').textContent === 'Schmieden');
+  teleport(14, -8);
+  await pump(150);
+  ok('Am Feuer: Knopf „Am Feuer“', el('use-label').textContent === 'Am Feuer');
+  await pump(400);                 // der Knopf sperrt Doppeltipps kurz
+  el('use').dispatch('pointerdown');
+  await until(() => el('craft').hidden === false);
+  ok('Lagerfeuer-Menü: Titel „Lagerfeuer“', el('craft-title').textContent === 'Lagerfeuer' && el('craft-list').children.length === 1);
+  teleport(15, 15);
+  await pump(150);
+  ok('Weggehen schließt das Lagerfeuer-Menü', el('craft').hidden === true);
+
   // ---- Abmelden ----
   const before = { ...P().a };
   el('logout').dispatch('click');
