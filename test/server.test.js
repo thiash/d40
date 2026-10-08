@@ -895,6 +895,11 @@ function get(port, urlPath) {
     r = await a.waitFor((x) => x.t === 'admin' && x.op === 'ban', 2000, from);
     const opfer = await S.getStore().findAccount('testopfer');
     ok('Sperren speichert das Kennzeichen', r.ok === true && opfer.banned === true);
+    from = a.mark();
+    a.send({ t: 'admin', op: 'log' });
+    const lg = await a.waitFor((x) => x.t === 'admin' && x.op === 'log', 2000, from);
+    ok('Protokoll zeigt die Aktionen, neueste zuerst', lg.entries.length >= 4 && /sperrt Testopfer/.test(lg.entries[0].text)
+      && lg.entries.some((e) => /gibt/.test(e.text)) && lg.entries[0].by === a.p.name);
     a.p.admin = false;
     from = a.mark();
     a.send({ t: 'admin', op: 'give', name: a.p.name, k: 'meat', n: 1 });
