@@ -150,6 +150,22 @@ const RULES = {                    // geht beim Verbinden an den Client
 
 const WORLD = { maxEnemies: 24 };  // Obergrenze für Tiere in der Testzone
 
+// Aussehen der Figur – dieselben Grenzen wie im Client (character.js)
+const LOOK_LIMITS = { skin: 4, hair: 5, style: 2, beard: 1 };
+function normLook(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const int = (v, max, d) => (Number.isInteger(v) && v >= 0 && v <= max ? v : d);
+  const sex = r.sex === 'f' ? 'f' : 'm';
+  return {
+    sex,
+    skin: int(r.skin, LOOK_LIMITS.skin, 1),
+    hair: int(r.hair, LOOK_LIMITS.hair, 1),
+    style: int(r.style, LOOK_LIMITS.style, 0),
+    beard: sex === 'm' ? int(r.beard, LOOK_LIMITS.beard, 0) : 0,
+  };
+}
+const LOOK_GAP_MS = 250;           // Aussehen höchstens viermal pro Sekunde ändern
+
 const COLORS = [0xa8443a, 0x3f6e9e, 0x6f8f3a, 0xb98a2e, 0x6d4f8f, 0x2f8a80, 0x9e3f6e, 0x55636e];
 
 // ---------------------------------------------------------------------------
@@ -294,7 +310,7 @@ let nextLootId = 1;
 let stopping = false;
 
 function publicPlayer(p) {
-  return { id: p.id, name: p.name, color: p.color, x: r2(p.x), z: r2(p.z), ry: r2(p.ry),
+  return { id: p.id, name: p.name, color: p.color, look: p.look, x: r2(p.x), z: r2(p.z), ry: r2(p.ry),
            hp: Math.round(p.hp), hpMax: p.hpMax, ko: p.ko, w: p.weapon };
 }
 function publicEnemy(e) {
@@ -391,6 +407,7 @@ function onConnection(ws, req) {
       case 'craft': handleCraft(p, msg); break;
       case 'cook': handleCook(p, msg); break;
       case 'eat': handleEat(p, msg); break;
+      case 'look': handleLook(p, msg); break;
     }
   });
   ws.on('close', () => {
@@ -466,6 +483,7 @@ async function handleAuth(conn, msg) {
       }
       if (acc.banned) throw deny('banned', 'Dieses Konto ist gesperrt.');
       account = { id: acc.id, name: acc.name, admin: !!acc.admin };
+      if (fresh) account.look = normLook(msg.look);   // beim Anlegen gewählt
       token = newToken();
       await db.createSession(hashToken(token), account.id);
       if (db.touchAccount) db.touchAccount(account.id).catch(() => {});
@@ -647,6 +665,7 @@ function createPlayer(conn, account, data) {
   const p = {
     id: nextId++, accountId: account.id, conn, ws: conn.ws,
     name: account.name,
+    look: normLook(d.look !== undefined ? d.look : account.look), lastLookAt: 0,
     color: COLORS[(account.id - 1) % COLORS.length],
     x, z, ry: Number.isFinite(d.ry) ? d.ry : 0,
     a, hpMax, manaMax,
@@ -675,7 +694,7 @@ function snapshot(p) {
     v: 2, x: r2(p.x), z: r2(p.z), ry: r2(p.ry),
     hp: Math.round(p.hp), mana: Math.floor(p.mana), w: p.weapon,
     a: { str: p.a.str, sta: p.a.sta, agi: p.a.agi, int: p.a.int, wis: p.a.wis },
-    inv: { ...p.inv }, chest: { ...p.chest },
+    inv: { ...p.inv }, chest: { ...p.chest }, look: { ...p.look },
   };
 }
 
@@ -920,6 +939,18 @@ function handleCook(p, msg) {
   moveItem(p.inv, null, 'meat', n);
   addItems(p.inv, { grilled_meat: n });
   sendSelf(p, { cooked: { grilled_meat: n } });
+}
+
+// Aussehen ändern: geprüft, gespeichert, an alle weitergegeben
+function handleLook(p, msg) {
+  const now = Date.now();
+  if (now - p.lastLookAt < LOOK_GAP_MS) return;
+  p.lastLookAt = now;
+  p.lastInputAt = now;
+  const look = normLook(msg.look);
+  if (JSON.stringify(look) === JSON.stringify(p.look)) return;
+  p.look = look;
+  broadcast({ t: 'look', id: p.id, look });
 }
 
 // Essen heilt, überall; rohes Fleisch weniger als gegrilltes
@@ -1301,7 +1332,7 @@ if (require.main === module) {
 // Für die automatischen Tests
 module.exports = {
   start, stop, saveAll, players, enemies, conns, loots, spawnEnemy, spawnLoot, removeLoot, snapshot,
-  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding, isEnvAdmin,
+  COMBAT, WORLD, WEAPONS, SPELLS, ENEMY_KINDS, SAVE, LIMITS, ITEMS, DROPS, LOOT, CHEST, CARRY, normLook, moveSpeedBonus, CRAFT, FOOD, FORGE, FIRE, weaponOk, BUILDINGS, inBuilding, isEnvAdmin,
   carryCap, weightOf, loadFactor, rollDrops,
   freshAttrs, maxHp, maxMana, manaRegen, healShare, attackCooldown, dodgeChance, damageOf, heightAt,
   getStore: () => db,

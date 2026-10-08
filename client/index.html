@@ -196,7 +196,7 @@
   }
   #stats dt:nth-of-type(6) { color: var(--bone); }
   #stats .note { margin: 10px 0 0; font-size: 13px; line-height: 1.4; color: var(--bone-dim); font-style: italic; }
-  #logout {
+  #logout, #look-btn {
     margin-top: 12px; width: 100%; padding: 7px 0; border-radius: 8px; cursor: pointer;
     background: transparent; border: 1px solid rgba(236, 227, 204, 0.3);
     color: var(--bone-dim); font: 500 14px/1.2 var(--sans);
@@ -242,6 +242,34 @@
   #login button[hidden], #login p[hidden] { display: none; }
   #login button:disabled { opacity: 0.55; cursor: progress; }
   #login button:focus-visible, #logout:focus-visible { outline: 3px solid var(--bone); outline-offset: 3px; }
+  #login .sex-pick { display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center;
+    margin-top: 14px; font-size: 14px; color: var(--bone-dim); }
+  #login .sex-pick button { padding: 9px 0; font: 600 15px/1.2 var(--sans); color: var(--bone);
+    background: transparent; border: 1px solid rgba(236, 227, 204, 0.28); }
+  #login .sex-pick button[aria-pressed="true"] { border-color: var(--brass); background: rgba(201, 162, 74, 0.2); color: #f6e7c4; }
+  #look-btn + #logout { margin-top: 8px; }
+
+  /* Aussehen: unten links, damit die Figur in der Mitte sichtbar bleibt */
+  #look {
+    position: fixed; left: calc(var(--sal) + 12px); bottom: calc(var(--sab) + 12px); z-index: 6;
+    width: min(calc(100vw - 24px), 340px); padding: 12px 14px; border-radius: 14px;
+    background: rgba(31, 43, 34, 0.92); border: 1px solid rgba(201, 162, 74, 0.55);
+  }
+  #look[hidden], #look-beard-row[hidden] { display: none; }
+  #look h2 { margin: 0 0 8px; font: 700 20px/1.2 var(--display); letter-spacing: 0.05em; color: var(--brass); }
+  .look-row { display: grid; grid-template-columns: 58px 1fr; align-items: center; gap: 8px; margin: 7px 0; font-size: 14px; color: var(--bone-dim); }
+  .look-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .look-opts button { padding: 7px 11px; border-radius: 8px; cursor: pointer; touch-action: manipulation;
+    background: transparent; border: 1px solid rgba(236, 227, 204, 0.3); color: var(--bone); font: 500 14px/1.1 var(--sans); }
+  .look-opts button[aria-pressed="true"] { border-color: var(--brass); background: rgba(201, 162, 74, 0.22); color: #f6e7c4; }
+  .look-opts .swatch { width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 2px solid rgba(236, 227, 204, 0.35); }
+  .look-opts .swatch[aria-pressed="true"] { border: 3px solid var(--brass); box-shadow: 0 0 0 2px rgba(20, 28, 22, 0.8); }
+  .look-opts button:focus-visible, #look-close:focus-visible { outline: 3px solid var(--bone); outline-offset: 2px; }
+  #look-close { display: block; width: 100%; margin-top: 10px; padding: 9px 0; border-radius: 9px; cursor: pointer;
+    background: transparent; border: 1px solid rgba(236, 227, 204, 0.3); color: var(--bone); font: 500 15px/1.2 var(--sans); }
+  body.login-open #look { display: none; }
+  body.look-open #hint, body.look-open #stick, body.look-open #log { display: none; }
+
   #login .small { margin: 14px 0 0; font-size: 13px; line-height: 1.45; color: var(--bone-dim); }
   #login-warn { color: var(--amber) !important; }
 
@@ -428,6 +456,15 @@
     <p id="admin-note" class="empty"></p>
     <button id="admin-close" class="wide" type="button">Schließen</button>
   </section>
+  <section id="look" aria-label="Aussehen" hidden>
+    <h2>Aussehen</h2>
+    <div class="look-row"><span>Figur</span><div id="look-sex" class="look-opts"></div></div>
+    <div class="look-row"><span>Haut</span><div id="look-skin" class="look-opts"></div></div>
+    <div class="look-row"><span>Haar</span><div id="look-hair" class="look-opts"></div></div>
+    <div class="look-row"><span>Frisur</span><div id="look-style" class="look-opts"></div></div>
+    <div class="look-row" id="look-beard-row"><span>Bart</span><div id="look-beard" class="look-opts"></div></div>
+    <button id="look-close" type="button">Fertig</button>
+  </section>
   <section id="craft" aria-label="Schmiede und Feuer" hidden>
     <h2 id="craft-title">Schmiede</h2>
     <p id="craft-note" class="empty"></p>
@@ -438,6 +475,7 @@
   <section id="stats" class="glass" aria-label="Charakterwerte" hidden>
     <dl id="stats-list"></dl>
     <p class="note">Du wirst besser in dem, was du tust: Schwert macht stark, Bogen beweglich, Einstecken zäh.</p>
+    <button id="look-btn" type="button">Aussehen ändern</button>
     <button id="logout" type="button">Abmelden</button>
   </section>
 
@@ -456,6 +494,11 @@
       </label>
       <p id="login-error" role="alert"></p>
       <button id="login-go" type="submit" value="login">Anmelden</button>
+      <div class="sex-pick" role="group" aria-label="Neue Figur">
+        <span>Neue Figur:</span>
+        <button id="login-sex-m" type="button" aria-pressed="true">Mann</button>
+        <button id="login-sex-f" type="button" aria-pressed="false">Frau</button>
+      </div>
       <button id="login-new" type="submit" value="register">Neuen Charakter anlegen</button>
       <p class="small">Neu hier? Wähle einen Namen und ein Passwort und tippe auf „Neuen Charakter anlegen“. Dieses Gerät merkt sich danach die Anmeldung.</p>
       <p id="login-warn" class="small" hidden>Der Server speichert gerade nicht dauerhaft. Nach einem Neustart beginnt alles von vorn.</p>
@@ -507,10 +550,12 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="world.js"></script>
+  <script src="character.js"></script>
   <script src="net.js"></script>
   <script src="combat.js"></script>
   <script src="items.js"></script>
   <script src="admin.js"></script>
+  <script src="look.js"></script>
   <script>
 'use strict';
 // Spielschleife: hält Welt, Steuerung, Netzwerk, Kampf und Gegenstände im Takt

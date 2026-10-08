@@ -907,6 +907,29 @@ function get(port, urlPath) {
     ok('Ohne Kennzeichen keine Verwaltung', a.p.inv.meat === 3 && a.count((x) => x.t === 'admin', from) === 0);
   });
 
+  await safely('Aussehen', async () => {
+    const oldNew = S.LIMITS.maxNew;
+    S.LIMITS.maxNew = 1000;
+    const lina = new Client(port, { t: 'register', name: 'Lina', pass: 'geheim123', look: { sex: 'f', skin: 3, hair: 4, style: 2, beard: 1 } });
+    const w = await lina.ready();
+    S.LIMITS.maxNew = oldNew;
+    ok('Neue Figur: gewähltes Aussehen kommt an, Frauen ohne Bart',
+      w.you.look.sex === 'f' && w.you.look.skin === 3 && w.you.look.hair === 4 && w.you.look.style === 2 && w.you.look.beard === 0, JSON.stringify(w.you.look));
+    const join = await a.waitFor((x) => x.t === 'join' && x.player.name === 'Lina', 2000, 0);
+    ok('Andere sehen das Aussehen beim Betreten', join.player.look.sex === 'f' && join.player.look.hair === 4);
+    let from = a.mark();
+    lina.send({ t: 'look', look: { sex: 'm', skin: 9, hair: 2, style: 1, beard: 1 } });
+    const lk = await a.waitFor((x) => x.t === 'look' && x.id === lina.id, 2000, from);
+    ok('Aussehen ändern: geprüft und an alle weitergegeben',
+      lk.look.sex === 'm' && lk.look.skin === 1 && lk.look.hair === 2 && lk.look.style === 1 && lk.look.beard === 1, JSON.stringify(lk.look));
+    ok('Aussehen wird mit dem Charakter gespeichert', S.snapshot(lina.p).look.sex === 'm' && S.snapshot(lina.p).look.beard === 1);
+    lina.send({ t: 'look', look: { sex: 'f' } });            // gleich danach: gedrosselt
+    await sleep(120);
+    ok('Zu schnelle Änderungen werden ignoriert', lina.p.look.sex === 'm');
+    ok('Unsinniges Aussehen wird zum Standard', JSON.stringify(S.normLook('quatsch')) === JSON.stringify({ sex: 'm', skin: 1, hair: 1, style: 0, beard: 0 }));
+    lina.ws.close();
+  });
+
   await safely('Statusseite', async () => {
     const st = await getJson('/status');
     ok('/status zeigt den Speicherweg ohne Geheimnisse', st && /Arbeitsspeicher/.test(st.speichern)

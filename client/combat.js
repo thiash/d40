@@ -205,6 +205,7 @@ function onCombat(msg) {
         refreshHud();
       }
       const model = actorModel(msg.id);
+      if (model && !msg.dodge) model.userData.hurt = 0;   // kurzer Ruck beim Treffer
       if (msg.dodge) floatText(model, 'Ausgewichen', '#bfe3f0', 2.3);
       else floatText(model, `−${msg.dmg}`, '#ff8a70', 2.3);
       break;
