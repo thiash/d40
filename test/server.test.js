@@ -858,6 +858,46 @@ function get(port, urlPath) {
     ok('Server lässt niemanden durch die Mauer laufen', !!c && a.p.x === -21.5);
   });
 
+  await safely('Administrator-Figur', async () => {
+    a.p.admin = true;                                // Kennzeichen wie vom Skript gesetzt
+    a.p.inv = {};
+    let from = a.mark();
+    a.send({ t: 'admin', op: 'give', name: a.p.name, k: 'meat', n: 3 });
+    let r = await a.waitFor((x) => x.t === 'admin' && x.op === 'give', 2000, from);
+    ok('Gegenstand geben: kommt an', r.ok === true && a.p.inv.meat === 3, JSON.stringify(r));
+    from = a.mark();
+    a.send({ t: 'admin', op: 'give', name: a.p.name, k: 'nichts', n: 1 });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'give', 2000, from);
+    ok('Unbekannter Gegenstand wird abgelehnt', r.ok === false && !a.p.inv.nichts);
+    from = a.mark();
+    a.send({ t: 'admin', op: 'search', name: a.p.name.slice(0, 3) });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'search', 2000, from);
+    ok('Spieler suchen findet den eigenen Namen', r.results.some((q) => q.name === a.p.name && q.online === true));
+    from = a.mark();
+    a.send({ t: 'admin', op: 'ban', name: a.p.name, on: true });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'ban', 2000, from);
+    ok('Sich selbst sperren geht nicht', r.ok === false && a.p.ws.readyState === 1);
+    from = a.mark();
+    a.send({ t: 'admin', op: 'visible', on: false });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'visible', 2000, from);
+    ok('Unsichtbar schalten', r.ok === true && a.p.hidden === true);
+    from = a.mark();
+    a.send({ t: 'admin', op: 'visible', on: true });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'visible', 2000, from);
+    ok('Wieder sichtbar schalten', r.ok === true && a.p.hidden === false);
+    await S.getStore().createAccount('Testopfer', 'testopfer', 'x');
+    from = a.mark();
+    a.send({ t: 'admin', op: 'ban', name: 'Testopfer', on: true });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'ban', 2000, from);
+    const opfer = await S.getStore().findAccount('testopfer');
+    ok('Sperren speichert das Kennzeichen', r.ok === true && opfer.banned === true);
+    a.p.admin = false;
+    from = a.mark();
+    a.send({ t: 'admin', op: 'give', name: a.p.name, k: 'meat', n: 1 });
+    await sleep(150);
+    ok('Ohne Kennzeichen keine Verwaltung', a.p.inv.meat === 3 && a.count((x) => x.t === 'admin', from) === 0);
+  });
+
   await safely('Statusseite', async () => {
     const st = await getJson('/status');
     ok('/status zeigt den Speicherweg ohne Geheimnisse', st && /Arbeitsspeicher/.test(st.speichern)

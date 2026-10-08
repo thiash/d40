@@ -423,6 +423,9 @@ function onMessage(msg) {
     case 'pong':
       net.ping = Math.round(performance.now() - msg.ts);
       break;
+    case 'admin':                   // Antwort auf einen Verwaltungs-Befehl → admin.js
+      onAdminMessage(msg);
+      break;
     default:                        // attack, cast, hitE, hitP, you, ko, revive → combat.js
       onCombat(msg);
   }

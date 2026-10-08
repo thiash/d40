@@ -399,6 +399,7 @@ function resetItems() {             // Abmelden oder Verbindung weg
 //  Im Takt der Spielschleife
 // ===========================================================================
 function updateItems(dt) {
+  if (typeof refreshAdmin === 'function') refreshAdmin();
   for (const pile of lootPiles.values()) {
     animateLoot(pile.model, pile.x, pile.z, dt);
     const free = canTake(pile);

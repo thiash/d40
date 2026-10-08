@@ -152,7 +152,22 @@
     box-shadow: 0 6px 16px rgba(20, 28, 22, 0.45);
   }
   #use:focus-visible { outline: 3px solid var(--bone); outline-offset: 4px; }
-  #bag[hidden], #chest[hidden], #craft[hidden], #use[hidden] { display: none; }
+  #bag[hidden], #chest[hidden], #craft[hidden], #admin[hidden], #admin-btn[hidden], #use[hidden] { display: none; }
+  #admin { position: fixed; left: 50%; top: calc(var(--sat) + 52px); transform: translateX(-50%); width: min(calc(100vw - 24px), 360px);
+    max-height: calc(100vh - var(--sat) - var(--sab) - 200px); overflow-y: auto; padding: 14px 16px; border-radius: 14px; z-index: 5;
+    background: rgba(31, 43, 34, 0.94); border: 1px solid rgba(201, 162, 74, 0.55); touch-action: pan-y; }
+  #admin h2 { margin: 0 0 4px; font: 700 20px/1.2 var(--display); letter-spacing: 0.05em; color: var(--brass); }
+  #admin h3 { margin: 14px 0 6px; font-size: 14px; font-weight: 500; color: var(--bone-dim); }
+  #admin .field { display: block; margin: 8px 0; font-size: 14px; color: var(--bone-dim); }
+  #admin input, #admin select { display: block; width: 100%; margin-top: 4px; padding: 8px; border-radius: 8px; box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(236, 227, 204, 0.25); color: var(--bone); font: 15px var(--sans); }
+  #admin .admin-give { display: grid; grid-template-columns: 1fr 88px; gap: 8px; }
+  #admin .wide { display: block; width: 100%; margin: 6px 0; padding: 9px 0; border-radius: 9px; cursor: pointer;
+    background: transparent; border: 1px solid rgba(236, 227, 204, 0.3); color: var(--bone); font: 500 15px/1.2 var(--sans); }
+  #admin .wide:focus-visible, #admin input:focus-visible, #admin select:focus-visible { outline: 3px solid var(--bone); outline-offset: 2px; }
+  #admin .item button { padding: 6px 10px; border-radius: 8px; cursor: pointer; background: transparent;
+    border: 1px solid rgba(201, 162, 74, 0.55); color: var(--bone); font: 500 14px/1.1 var(--sans); }
+  body.chest-open #admin ~ #log, body.chest-open #log { display: none; }
   @media (max-width: 430px) {            /* schmale Handys: oben ist es eng */
     #status { gap: 8px; padding-right: 12px; }
     #status .ping { display: none; }
@@ -333,7 +348,7 @@
 
   /* Während der Anmeldung ist nur das Formular zu sehen – steht am Ende, damit es alles andere überstimmt */
   body.login-open #attack, body.login-open .act, body.login-open #corner, body.login-open #stats,
-  body.login-open #bag, body.login-open #chest, body.login-open #craft, body.login-open #use,
+  body.login-open #bag, body.login-open #chest, body.login-open #craft, body.login-open #admin, body.login-open #use,
   body.login-open #vitals, body.login-open #hint, body.login-open #stick, body.login-open #log { display: none; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -379,6 +394,7 @@
   <div id="corner">
     <button id="bag-btn" class="glass" type="button" aria-expanded="false" aria-controls="bag">Tasche</button>
     <button id="stats-btn" class="glass" type="button" aria-expanded="false" aria-controls="stats">Werte</button>
+    <button id="admin-btn" class="glass" type="button" hidden>Verwaltung</button>
   </div>
   <section id="bag" class="glass" aria-label="Tasche" hidden>
     <p id="bag-load">Last 0,0 / 40,0 kg</p>
@@ -392,6 +408,24 @@
     <h3 id="chest-load">In deiner Tasche</h3>
     <div id="chest-bag"></div>
     <button id="chest-close" type="button">Schließen</button>
+  </section>
+  <section id="admin" aria-label="Verwaltung" hidden>
+    <h2>Verwaltung</h2>
+    <p class="empty">Nur für Administratoren. Jede Aktion prüft der Server.</p>
+    <label class="field">Spielername<input id="admin-name" type="text" maxlength="16" autocomplete="off"></label>
+    <button id="admin-search" class="wide" type="button">Spieler suchen</button>
+    <div id="admin-results"></div>
+    <h3>Gegenstand geben</h3>
+    <div class="admin-give">
+      <select id="admin-item" aria-label="Gegenstand"></select>
+      <input id="admin-n" type="number" min="1" max="9999" value="1" aria-label="Anzahl">
+    </div>
+    <button id="admin-give" class="wide" type="button">Geben</button>
+    <h3>Spieler</h3>
+    <button id="admin-ban" class="wide" type="button">Sperren</button>
+    <button id="admin-vis" class="wide" type="button">Unsichtbar machen</button>
+    <p id="admin-note" class="empty"></p>
+    <button id="admin-close" class="wide" type="button">Schließen</button>
   </section>
   <section id="craft" aria-label="Schmiede und Feuer" hidden>
     <h2 id="craft-title">Schmiede</h2>
@@ -475,6 +509,7 @@
   <script src="net.js"></script>
   <script src="combat.js"></script>
   <script src="items.js"></script>
+  <script src="admin.js"></script>
   <script>
 'use strict';
 // Spielschleife: hält Welt, Steuerung, Netzwerk, Kampf und Gegenstände im Takt
