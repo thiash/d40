@@ -14,6 +14,8 @@ const lookUi = {
   hair: document.getElementById('look-hair'),
   style: document.getElementById('look-style'),
   beard: document.getElementById('look-beard'),
+  face: document.getElementById('look-face'),
+  build: document.getElementById('look-build'),
   beardRow: document.getElementById('look-beard-row'),
   close: document.getElementById('look-close'),
 };
@@ -46,14 +48,15 @@ function lookOption(label, pressed, onClick, swatch) {
 
 function renderLook() {
   const L = currentLook();
-  for (const el of [lookUi.sex, lookUi.skin, lookUi.hair, lookUi.style, lookUi.beard]) clearEl(el);
+  for (const el of [lookUi.sex, lookUi.face, lookUi.build, lookUi.skin, lookUi.hair, lookUi.style, lookUi.beard]) clearEl(el);
   lookUi.sex.appendChild(lookOption('Mann', L.sex === 'm', () => sendLook({ sex: 'm' })));
   lookUi.sex.appendChild(lookOption('Frau', L.sex === 'f', () => sendLook({ sex: 'f' })));
+  LOOK_FACES[L.sex].forEach((name, i) => lookUi.face.appendChild(lookOption(name, L.face === i, () => sendLook({ face: i }))));
+  LOOK_BUILDS.forEach((name, i) => lookUi.build.appendChild(lookOption(name, L.build === i, () => sendLook({ build: i }))));
   LOOK_SKIN.forEach((hex, i) => lookUi.skin.appendChild(lookOption(SKIN_NAMES[i], L.skin === i, () => sendLook({ skin: i }), hex)));
   LOOK_HAIR.forEach((hex, i) => lookUi.hair.appendChild(lookOption(HAIR_NAMES[i], L.hair === i, () => sendLook({ hair: i }), hex)));
   LOOK_STYLES[L.sex].forEach((name, i) => lookUi.style.appendChild(lookOption(name, L.style === i, () => sendLook({ style: i }))));
-  lookUi.beard.appendChild(lookOption('Ohne', !L.beard, () => sendLook({ beard: 0 })));
-  lookUi.beard.appendChild(lookOption('Mit', !!L.beard, () => sendLook({ beard: 1 })));
+  LOOK_BEARDS.forEach((name, i) => lookUi.beard.appendChild(lookOption(name, L.beard === i, () => sendLook({ beard: i }))));
   lookUi.beardRow.hidden = L.sex !== 'm';
 }
 

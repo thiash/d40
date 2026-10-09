@@ -25,16 +25,27 @@ Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.
 
 ### Figuren
 
-Jede Figur hat ein Skelett mit Hüfte, Wirbelsäule, Brust, Hals, Kopf, Schultern, Ellbogen,
-Händen, Knien und Füßen. Der Kopf ist modelliert statt rund: Stirn, Brauenbogen,
-Augenhöhlen, Nase mit Nasenflügeln, Wangenknochen, Lippen, Kinn und eine Kieferkante; das
-Frauengesicht ist zierlicher. Die Augen haben Iris, Pupille und Lider, die beim Blinzeln
-zugehen. Haare und Bart liegen als Schicht auf der Kopfform und laufen am Ansatz weich aus.
-Rumpf und Glieder haben Muskelformen, die Hände sind Fäuste. Dazu Tunika, Gürtel, Hose,
-Stiefel und Rucksack. Männlich oder weiblich, fünf Hauttöne,
-sechs Haarfarben, je drei Frisuren, beim Mann auf Wunsch ein Bart. Das Geschlecht wählt man
-beim Anlegen, alles andere unter **Werte → Aussehen ändern**. Der Server prüft und speichert
-das Aussehen und gibt es an alle weiter.
+Die Gestaltung folgt einer Recherche zu The 4th Coming (Die 4. Offenbarung), vergleichbaren
+Online-Rollenspielen und Spielermeinungen aus Foren: Spieler wollen sich unterscheiden
+(„alle sahen gleich aus“ war die Kritik am Original), Gesichter sollen lebendig statt
+puppenhaft wirken, und die Figur muss auch aus der Entfernung auf dem Tablet lesbar sein.
+
+- **Kopf** modelliert statt rund: Stirn, Brauenbogen, Augenhöhlen, Nase, Wangenknochen,
+  Lippen, Kinn, Kieferkante. Frauen: kein Brauenwulst, kürzeres Untergesicht, spitzeres
+  Kinn, schmaler Kiefer. Je Geschlecht vier Gesichter (Mann: Klassisch, Kantig, Weich,
+  Markant; Frau: Klassisch, Zart, Rund, Markant). Der Kopf ist 6 % größer als echt.
+- **Augen**: Iris in fünf Farben, Pupille, Glanzpunkt, Lidschatten; das Oberlid deckt die
+  Iris oben knapp ab (sonst wirkt der Blick starr). Kleine Blicksprünge, Blinzeln alle
+  2–7 Sekunden und bei schnellen Drehungen.
+- **Haare** als Kappe entlang der Kopfform mit dunklerem Ansatz, darauf Strähnen-Büschel für
+  eine lebendige Silhouette. Mann: Kurz, Zopf, Lang, Glatze (Haarkranz), Strubbel. Frau:
+  Lang, Pferdeschwanz, Dutt, Bob, Zöpfe. Bart: Ohne, Vollbart, Kinnbart, Stoppeln.
+- **Körper** mit Muskelformen, Statur Schlank/Normal/Kräftig, etwas größere Hände; im Stand
+  ruht das Gewicht auf einem Bein. Fünf Hauttöne, sechs Haarfarben. Ein Lichtsaum am Rand
+  hebt die Figur vom Hintergrund ab. Wer einen Bogen trägt, hat einen Köcher an der Hüfte.
+
+Das Geschlecht wählt man beim Anlegen, alles andere unter **Werte → Aussehen ändern**. Der
+Server prüft und speichert das Aussehen und gibt es an alle weiter.
 
 Bewegungen: Atmen und Gewicht verlagern im Stand, Gehen und Rennen (fließend je nach Tempo),
 Schwerthieb mit Ausholen über die Schulter, Dolchstich mit Ausfallschritt, Bogen spannen mit
