@@ -71,7 +71,7 @@ function openLook(open) {
     lookState.cam = { yaw: camYaw, pitch: camPitch, dist: camDist };
     camYaw = me.ry;                 // Kamera vor die Figur: ein Spiegel
     camPitch = 0.16;
-    camDist = 4.2;
+    camDist = 3.4;
     renderLook();
   } else if (lookState.cam) {
     camYaw = lookState.cam.yaw;

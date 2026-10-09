@@ -44,6 +44,10 @@ function makeEngine() {
     return one({ id: String(id) });
   });
   known.set(norm(Q.touchAccount), () => []);
+  db.adminLog = [];
+  known.set(norm(Q.addAdminLog), ([by, text]) => { db.adminLog.push({ at: Date.now(), by, text }); return []; });
+  known.set(norm(Q.listAdminLog), ([limit]) => db.adminLog.slice(-Number(limit)).reverse()
+    .map((e) => ({ at_ms: String(e.at), by_name: e.by, text: e.text })));
   known.set(norm(Q.loadCharacter), ([id]) => (db.chars.has(id) ? one({ data: db.chars.get(id) }) : []));
   known.set(norm(Q.saveCharacter), ([id, json]) => {
     try { JSON.parse(json); } catch { throw sqlErr('invalid input syntax for type json', '22P02'); }
@@ -231,7 +235,7 @@ function getJson(port, path) {
     const r = await mira.answer();
     ok('Neuer Charakter über die HTTP-Schnittstelle', r.t === 'welcome' && r.you.name === 'Mira', JSON.stringify(r));
     ok('Kopfzeilen und Adresse entsprechen Neons Protokoll', fake.badHeaders.length === 0, fake.badHeaders.join(', '));
-    ok('Tabellen und Spalten werden angelegt', engine.schema.length === 6);
+    ok('Tabellen und Spalten werden angelegt', engine.schema.length === 7);
     await sleep(150);
     const acc = engine.accounts.get('mira');
     ok('Konto und Charakter liegen in der Datenbank', acc && acc.pass.startsWith('scrypt$') && engine.chars.has(String(acc.id)));
@@ -243,6 +247,8 @@ function getJson(port, path) {
     mira.p.a.agi = 12.25;
     mira.p.x = -12.5;
     mira.p.weapon = 'bow';
+    await db.addAdminLog('Creator', 'Creator gibt Mira 2 × meat');
+    await db.addAdminLog('Creator', 'Creator sperrt Störenfried');
     await S.stop();
     const saved = JSON.parse(engine.chars.get(String(engine.accounts.get('mira').id)));
     ok('Vor dem Neustart ist alles gespeichert', saved.a.str === 17.5 && saved.x === -12.5 && saved.w === 'bow', JSON.stringify(saved));
@@ -259,6 +265,9 @@ function getJson(port, path) {
     const pw = new Client(port, { t: 'login', name: 'mira', pass: 'Sternenstaub' });
     const r2 = await pw.answer();
     ok('Nach dem Neustart: Anmeldung mit Passwort', r2.t === 'welcome' && r2.self.a.str === 17.5);
+    const logRows = await db.listAdminLog(50);
+    ok('Nach dem Neustart: Verwaltungs-Protokoll ist noch da, neueste zuerst', logRows.length === 2
+      && logRows[0].text === 'Creator sperrt Störenfried' && logRows[0].by === 'Creator' && !Number.isNaN(Date.parse(logRows[0].at)));
     mira = pw;
   });
 

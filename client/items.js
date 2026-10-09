@@ -28,6 +28,9 @@ const itemsUi = {
   craftNote: document.getElementById('craft-note'),
   craftList: document.getElementById('craft-list'),
   craftClose: document.getElementById('craft-close'),
+  progress: document.getElementById('craft-progress'),
+  progressLabel: document.getElementById('craft-progress-label'),
+  progressBar: document.getElementById('craft-progress-bar'),
 };
 
 const itemState = {
@@ -39,6 +42,8 @@ const itemState = {
   bagKey: '',                       // zuletzt gezeichneter Inhalt, um unnötiges Neuzeichnen zu sparen
   chestKey: '',
   craftKey: '',
+  forging: null,                    // { r, start, ms } solange am Amboss gearbeitet wird
+  hammerAt: 0,
   spd: 1,                           // zuletzt bekanntes Tempo – für Meldungen beim Überladen
 };
 
@@ -141,7 +146,7 @@ function useNearest() {
 //  Schmiede und Lagerfeuer: ein gemeinsames Menü
 // ===========================================================================
 const CRAFT_HINT = {
-  forge: 'Zutaten kommen aus deiner Tasche. Geschmiedete Waffen trägst du bei dir.',
+  forge: 'Zutaten kommen aus deiner Tasche. Schmieden dauert ein paar Sekunden – bleib dabei an der Schmiede.',
   fire: 'Rohes Fleisch wird am Feuer gegrillt. Gegrilltes heilt doppelt so viel.',
 };
 
@@ -177,7 +182,7 @@ function renderCraft(force) {
   if (!itemState.craftMode) return;
   const inv = me.self.inv || {};
   const mode = itemState.craftMode;
-  const key = mode + JSON.stringify(inv);
+  const key = mode + JSON.stringify(inv) + (itemState.forging ? itemState.forging.r : '');
   if (!force && key === itemState.craftKey) return;
   itemState.craftKey = key;
   itemsUi.craftTitle.textContent = mode === 'forge' ? 'Schmiede' : 'Lagerfeuer';
@@ -195,7 +200,7 @@ function renderCraft(force) {
       const costText = document.createElement('span');
       costText.className = 'cost';
       costText.textContent = listItems(cost);
-      const ok = Object.keys(cost).every((k) => (inv[k] || 0) >= cost[k]);
+      const ok = !itemState.forging && Object.keys(cost).every((k) => (inv[k] || 0) >= cost[k]);
       row.appendChild(name);
       row.appendChild(costText);
       row.appendChild(craftButton('Schmieden', () => sendMsg({ t: 'craft', r }), ok));
@@ -373,8 +378,17 @@ function onItemNotes(msg) {
     case 'forgefar': log('Die Schmiede ist zu weit weg.'); closeCraft(); break;
     case 'firefar': log('Das Lagerfeuer ist zu weit weg.'); closeCraft(); break;
     case 'missing': log('Dir fehlen die Zutaten.'); break;
+    case 'busy': log('Du schmiedest gerade schon.'); break;
   }
-  if (msg.crafted) log(`Du schmiedest ${listItems(msg.crafted)}.`);
+  if (msg.crafting) startForging(msg.crafting.r, msg.crafting.ms);
+  if (msg.craftStop) {
+    stopForging();
+    if (msg.note !== 'missing') log('Du hast die Schmiede verlassen. Das Schmieden ist abgebrochen.');
+  }
+  if (msg.crafted) {
+    stopForging();
+    log(`Fertig! Du hast ${listItems(msg.crafted)} geschmiedet.`);
+  }
   if (msg.cooked) log(`Du grillst ${listItems(msg.cooked)}.`);
   if (msg.ate) log(msg.ate === 'grilled_meat' ? 'Du isst das gegrillte Fleisch.' : 'Du isst das rohe Fleisch. Besser wäre es gegrillt.');
   const spd = msg.self.spd ?? 1;
@@ -386,7 +400,36 @@ function onItemNotes(msg) {
   }
 }
 
+// Fortschritt am Amboss: Balken füllt sich, die Figur hämmert
+function startForging(r, ms) {
+  itemState.forging = { r, start: performance.now(), ms };
+  const name = RULES.weapons[r] || r;
+  log(`Du schmiedest ${name} …`);
+  itemsUi.progressLabel.textContent = `${name} wird geschmiedet …`;
+  itemsUi.progress.hidden = false;
+  itemsUi.progressBar.style.width = '0%';
+  renderCraft(true);
+}
+function stopForging() {
+  if (!itemState.forging) return;
+  itemState.forging = null;
+  itemsUi.progress.hidden = true;
+  renderCraft(true);
+}
+function updateForging() {
+  const f = itemState.forging;
+  if (!f) return;
+  const now = performance.now();
+  itemsUi.progressBar.style.width = `${Math.min(100, ((now - f.start) / f.ms) * 100).toFixed(1)}%`;
+  const u = me.model && me.model.userData;
+  if (u && u.swing < 0 && now - itemState.hammerAt > 700 && !isBow(u.w)) {
+    u.swing = 0;                    // Hammerschlag
+    itemState.hammerAt = now;
+  }
+}
+
 function resetItems() {             // Abmelden oder Verbindung weg
+  stopForging();
   clearPiles();
   closeChest();
   closeCraft();
@@ -416,6 +459,7 @@ function updateItems(dt) {
     const at = RULES[itemState.craftMode];
     if (me.ko || !isOnline() || Math.hypot(at.x - me.x, at.z - me.z) > at.reach + 0.5) closeCraft();
   }
+  updateForging();
   animateVillage(performance.now() / 1000);
   const t = findTarget();
   const old = itemState.target;

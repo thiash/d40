@@ -353,6 +353,16 @@ function makeEl(id, hidden = false) {
   await until(() => el('craft').hidden === false);
   ok('Schmiede-Menü: drei Rezepte, Titel „Schmiede“', el('craft-title').textContent === 'Schmiede'
     && el('craft-list').children.length === Object.keys(ev('RULES.craft')).length && el('craft-list').children.length === 3);
+  const oldCraftMs = S.CRAFTING.ms;
+  S.CRAFTING.ms = 300;
+  P().inv = { ...P().inv, boar_hide: 3, boar_tusk: 2 };
+  ev("sendMsg({ t: 'craft', r: 'iron_sword' })");
+  await until(() => el('craft-progress').hidden === false);
+  ok('Schmieden: Fortschrittsbalken erscheint, Knöpfe gesperrt', ev("__logs.some((l) => l.startsWith('Du schmiedest '))")
+    && el('craft-list').children[0].children[2].disabled === true);
+  await until(() => el('craft-progress').hidden === true);
+  ok('Fertig: Balken weg, Schwert in der Tasche', ev('me.self.inv.iron_sword') === 1 && ev("__logs.some((l) => l.startsWith('Fertig!'))"));
+  S.CRAFTING.ms = oldCraftMs;
   el('craft-close').dispatch('click');
   ok('Schmiede-Menü schließt sich', el('craft').hidden === true && el('use-label').textContent === 'Schmieden');
   teleport(14, -8);
@@ -370,13 +380,13 @@ function makeEl(id, hidden = false) {
   // ---- Aussehen ----
   ok('Figur hat ein Aussehen', ev('me.model.userData.look.sex') === 'm' && ev('!!me.model.userData.j.head') === true);
   el('look-btn').dispatch('click');
-  ok('Aussehen-Panel öffnet sich, die Kamera schaut auf die Figur', el('look').hidden === false && ev('camDist') === 4.2);
+  ok('Aussehen-Panel öffnet sich, die Kamera schaut auf die Figur', el('look').hidden === false && ev('camDist') === 3.4);
   el('look-sex').children[1].dispatch('click');
   await until(() => ev('me.look && me.look.sex') === 'f');
   ok('Frau gewählt: der Server bestätigt, die Figur wird neu gebaut', ev('me.model.userData.look.sex') === 'f' && P().look.sex === 'f');
   ok('Frisuren für Frauen, kein Bart', el('look-style').children[1].textContent === 'Pferdeschwanz' && el('look-beard-row').hidden === true);
   el('look-close').dispatch('click');
-  ok('Fertig: Panel zu, Kamera zurück', el('look').hidden === true && ev('camDist') !== 4.2);
+  ok('Fertig: Panel zu, Kamera zurück', el('look').hidden === true && ev('camDist') !== 3.4);
   ok('Gebäude blockieren im Client wie im Server', ev('inBuilding(-24, -16)') === true && ev('inBuilding(0, 0)') === false);
 
   // ---- Abmelden ----
