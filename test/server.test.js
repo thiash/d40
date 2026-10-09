@@ -257,7 +257,10 @@ function get(port, urlPath) {
     const hits = a.msgs.slice(from).filter((x) => x.t === 'hitP' && x.id === a.id);
     const dodged = hits.filter((x) => x.dodge).length, taken = hits.length - dodged;
     const rate = dodged / hits.length;
-    ok('Ausweichen bei 55 % Deckel', hits.length > 20 && rate > 0.35 && rate < 0.75, `${dodged} von ${hits.length}`);
+    // Der Deckel wird genau geprüft; die Zählung im Kampf nur grob (±4 Standardabweichungen),
+    // damit der Zufall den Test nicht gelegentlich scheitern lässt
+    ok('Ausweichen bei 55 % Deckel', S.dodgeChance({ agi: 70 }) === 0.55 && S.dodgeChance({ agi: 500 }) === 0.55
+      && hits.length > 20 && rate > 0.2 && rate < 0.9, `${dodged} von ${hits.length}`);
     ok('Ausweichen gibt keine Ausdauer, nur echte Treffer', Math.abs(a.p.a.sta - sta0 - taken * 0.01) < 1e-6,
       `+${(a.p.a.sta - sta0).toFixed(3)} bei ${taken} Treffern`);
     ok('Ausgewichene Schläge machen keinen Schaden', hits.filter((x) => x.dodge).every((x) => x.dmg === 0));
