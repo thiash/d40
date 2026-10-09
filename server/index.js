@@ -152,7 +152,7 @@ const RULES = {                    // geht beim Verbinden an den Client
 const WORLD = { maxEnemies: 24 };  // Obergrenze für Tiere in der Testzone
 
 // Aussehen der Figur – dieselben Grenzen wie im Client (character.js)
-const LOOK_LIMITS = { skin: 4, hair: 5, style: 2, beard: 1 };
+const LOOK_LIMITS = { skin: 4, hair: 5, style: 4, beard: 3, face: 3, build: 2 };
 function normLook(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const int = (v, max, d) => (Number.isInteger(v) && v >= 0 && v <= max ? v : d);
@@ -163,6 +163,8 @@ function normLook(raw) {
     hair: int(r.hair, LOOK_LIMITS.hair, 1),
     style: int(r.style, LOOK_LIMITS.style, 0),
     beard: sex === 'm' ? int(r.beard, LOOK_LIMITS.beard, 0) : 0,
+    face: int(r.face, LOOK_LIMITS.face, 0),
+    build: int(r.build, LOOK_LIMITS.build, 1),
   };
 }
 const LOOK_GAP_MS = 250;           // Aussehen höchstens viermal pro Sekunde ändern

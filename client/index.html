@@ -260,6 +260,7 @@
   #look {
     position: fixed; left: calc(var(--sal) + 12px); bottom: calc(var(--sab) + 12px); z-index: 6;
     width: min(calc(100vw - 24px), 340px); padding: 12px 14px; border-radius: 14px;
+    max-height: calc(100vh - var(--sat) - var(--sab) - 80px); overflow-y: auto; touch-action: pan-y;
     background: rgba(31, 43, 34, 0.92); border: 1px solid rgba(201, 162, 74, 0.55);
   }
   #look[hidden], #look-beard-row[hidden] { display: none; }
@@ -466,6 +467,8 @@
   <section id="look" aria-label="Aussehen" hidden>
     <h2>Aussehen</h2>
     <div class="look-row"><span>Figur</span><div id="look-sex" class="look-opts"></div></div>
+    <div class="look-row"><span>Gesicht</span><div id="look-face" class="look-opts"></div></div>
+    <div class="look-row"><span>Statur</span><div id="look-build" class="look-opts"></div></div>
     <div class="look-row"><span>Haut</span><div id="look-skin" class="look-opts"></div></div>
     <div class="look-row"><span>Haar</span><div id="look-hair" class="look-opts"></div></div>
     <div class="look-row"><span>Frisur</span><div id="look-style" class="look-opts"></div></div>

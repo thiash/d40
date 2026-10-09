@@ -12,8 +12,10 @@
 // ---- Aussehen ----
 const LOOK_SKIN = [0xf1d0b4, 0xdcae88, 0xc08a60, 0x93613f, 0x5f3d2a];
 const LOOK_HAIR = [0x1d1814, 0x43291a, 0x7a4b28, 0xc9a35f, 0x8e3519, 0x9b968e];
-const LOOK_STYLES = { m: ['Kurz', 'Zopf', 'Lang'], f: ['Lang', 'Pferdeschwanz', 'Dutt'] };
-const LOOK_DEFAULT = { sex: 'm', skin: 1, hair: 1, style: 0, beard: 0 };
+const LOOK_STYLES = { m: ['Kurz', 'Zopf', 'Lang', 'Glatze', 'Strubbel'], f: ['Lang', 'Pferdeschwanz', 'Dutt', 'Bob', 'Zöpfe'] };
+const LOOK_BEARDS = ['Ohne', 'Vollbart', 'Kinnbart', 'Stoppeln'];
+const LOOK_BUILDS = ['Schlank', 'Normal', 'Kräftig'];
+const LOOK_DEFAULT = { sex: 'm', skin: 1, hair: 1, style: 0, beard: 0, face: 0, build: 1 };
 
 function normLook(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
@@ -23,8 +25,10 @@ function normLook(raw) {
     sex,
     skin: int(r.skin, LOOK_SKIN.length - 1, LOOK_DEFAULT.skin),
     hair: int(r.hair, LOOK_HAIR.length - 1, LOOK_DEFAULT.hair),
-    style: int(r.style, 2, 0),
-    beard: sex === 'm' ? int(r.beard, 1, 0) : 0,
+    style: int(r.style, 4, 0),
+    beard: sex === 'm' ? int(r.beard, LOOK_BEARDS.length - 1, 0) : 0,
+    face: int(r.face, 3, 0),
+    build: int(r.build, LOOK_BUILDS.length - 1, 1),
   };
 }
 
@@ -42,6 +46,16 @@ const CLOTH = {
 const CHAR_MAT = new THREE.MeshPhongMaterial({
   vertexColors: true, shininess: 14, specular: 0x1c1a18, side: THREE.DoubleSide,
 });
+// Lichtsaum am Rand (hebt die Figur vom Hintergrund ab) und etwas wärmeres Umgebungslicht,
+// damit Haut im Schatten nicht grünlich-grau wirkt
+CHAR_MAT.onBeforeCompile = (shader) => {
+  shader.fragmentShader = shader.fragmentShader.replace('#include <aomap_fragment>', `#include <aomap_fragment>
+    {
+      float rim = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
+      reflectedLight.indirectDiffuse *= vec3(1.07, 1.0, 0.93);
+      reflectedLight.indirectDiffuse += diffuseColor.rgb * rim * vec3(0.32, 0.29, 0.24);
+    }`);
+};
 const WEAPON_MATS = {
   steel:    new THREE.MeshPhongMaterial({ color: 0xc9d0d6, shininess: 70, specular: 0x8a8f94 }),
   iron:     new THREE.MeshPhongMaterial({ color: 0x5a636c, shininess: 45, specular: 0x50565c }),
@@ -280,14 +294,47 @@ function mix(a, b, t) {
 //  werden Stirn, Brauenbogen, Augenhöhlen, Nase, Wangen, Mund, Kinn und
 //  Kieferkante modelliert. Unten schneidet die Kieferunterseite weich ab.
 // ---------------------------------------------------------------------------
+// Grundmaße je Geschlecht. low staucht das Untergesicht (Nase, Mund) senkrecht –
+// Frauengesichter wirken mit kürzerem Untergesicht, spitzerem Kinn, schmalem Kiefer
+// und ohne Brauenwulst weiblicher (Augen–Mund ≈ 36 % der Gesichtslänge).
 const FACE = {
-  m: { s: 1, chinY: 0.124, taper: 0.34, edge: 0.006, brow: 0.0085, socket: 0.016, nose: 1, alae: 1, lips: 0.85, chin: 1.0, chinW: 0.007, jaw: 1, cheek: 1, maxilla: 0.012 },
-  f: { s: 0.95, taper: 0.56, edge: 0.012, brow: 0.003, socket: 0.014, nose: 0.72, alae: 0.75, lips: 1.3, chin: 0.55, chinW: 0.002, jaw: 0.2, cheek: 1.35, maxilla: 0.009, chinY: 0.11 },
+  m: { s: 1, chinY: 0.124, low: 1, taper: 0.34, edge: 0.006, brow: 0.0085, socket: 0.016, nose: 1, bump: 0, alae: 1,
+       upLip: 0.0042, lips: 0.85, chin: 1.0, chinW: 0.008, chinR: 0.019, jaw: 1, cheek: 1, bone: 1, maxilla: 0.012 },
+  f: { s: 0.95, chinY: 0.111, low: 0.92, taper: 0.56, edge: 0.012, brow: 0, socket: 0.014, nose: 0.72, bump: 0, alae: 0.75,
+       upLip: 0.0058, lips: 1.3, chin: 0.5, chinW: 0, chinR: 0.014, jaw: 0.2, cheek: 1.25, bone: 1.35, maxilla: 0.009 },
+};
+// Gesichtsvorlagen: Abweichungen von den Grundmaßen (Faktoren oder Zuschläge)
+const LOOK_FACES = { m: ['Klassisch', 'Kantig', 'Weich', 'Markant'], f: ['Klassisch', 'Zart', 'Rund', 'Markant'] };
+const FACE_PRESETS = {
+  m: [
+    {},
+    { jaw: 1.7, chin: 1.25, chinW: 0.014, brow: 1.3, bone: 1.15, taper: 0.85, edge: 0.7 },
+    { jaw: 0.55, cheek: 1.6, edge: 1.8, nose: 0.92, alae: 1.25, lips: 1.15, brow: 0.7, taper: 1.05 },
+    { nose: 1.12, bump: 1, bone: 1.5, lips: 0.8, taper: 1.15, chin: 1.1, low: 1.03 },
+  ],
+  f: [
+    {},
+    { nose: 0.85, chin: 0.8, taper: 1.07, bone: 1.1, low: 0.97 },
+    { cheek: 1.5, edge: 1.4, nose: 0.92, lips: 1.12, taper: 0.9, jaw: 1.5 },
+    { nose: 1.12, bump: 0.6, bone: 1.45, lips: 0.92, taper: 1.04, chin: 1.15, low: 1.02 },
+  ],
 };
 const EYE = { x: 0.0315, y: 0.0, r: 0.0118 };
 
-function makeHead(sex) {
-  const K = FACE[sex];
+function faceParams(sex, face) {
+  const K = { ...FACE[sex] };
+  const P = FACE_PRESETS[sex][face] || {};
+  for (const k in P) {
+    if (k === 'bump') K.bump = P.bump;
+    else if (k === 'chinW') K.chinW = P.chinW;
+    else K[k] *= P[k];
+  }
+  K.chinY *= P.low ? 0.5 + 0.5 * P.low : 1;
+  return K;
+}
+
+function makeHead(sex, face) {
+  const K = faceParams(sex, face);
   const s = K.s;
   const W = 0.0735, Ht = 0.118, Hb = 0.15, Df = 0.094, Db = 0.104;
   const nH = (dz) => 2.05 + 0.45 * sstep(-0.2, 0.5, dz);
@@ -296,52 +343,57 @@ function makeHead(sex) {
   function base(dx, dy, dz) {
     const n = nH(dz);
     const ax = Math.abs(dx) / W, ay = Math.abs(dy) / (dy > 0 ? Ht : Hb), az = Math.abs(dz) / (dz > 0 ? Df : Db);
-    let lo = 0, hi = 0.4;
-    for (let i = 0; i < 17; i++) {
-      const m = (lo + hi) / 2;
-      if (Math.pow(m * ax, n) + (m * ay) * (m * ay) + Math.pow(m * az, n) > 1) hi = m; else lo = m;
+    // A·ρⁿ + B·ρ² = 1 (x und z haben denselben Exponenten) – mit dem Newton-Verfahren gelöst
+    const A = Math.pow(ax, n) + Math.pow(az, n), Bq = ay * ay;
+    let r = 1 / Math.max(1e-6, Math.sqrt(Math.pow(A, 2 / n) + Bq));
+    for (let i = 0; i < 6; i++) {
+      const rn = Math.pow(r, n - 1);
+      const f = A * rn * r + Bq * r * r - 1, d = n * A * rn + 2 * Bq * r;
+      r = Math.max(1e-4, r - f / d);
     }
-    return [dx * lo, dy * lo, dz * lo];
+    return [dx * r, dy * r, dz * r];
   }
 
   // Gesichtsrelief nach vorn (z) – in Kopfmaßen (ohne Skalierung)
   function relief(x, y) {
     const ax = Math.abs(x);
+    const ly = y < 0 ? y / K.low : y;              // Untergesicht: Nase und Mund rücken näher an die Augen
     let d = 0;
     d += K.brow * gauss(y - 0.022, 0.011) * gauss(ax - 0.028, 0.026);            // Brauenbogen
-    d += 0.004 * gauss(y - 0.016, 0.01) * gauss(x, 0.012);                         // Nasenwurzel
+    d += (K.brow ? 0.004 : 0.002) * gauss(y - 0.016, 0.01) * gauss(x, 0.012);     // Nasenwurzel
     d -= K.socket * gauss(y - EYE.y, 0.0165) * gauss(ax - EYE.x, 0.0175);          // Augenhöhlen
     // Nase: Rücken wird zur Spitze hin höher und breiter, darunter fällt sie steil ab
     let prof = 0, w = 0.008;
-    if (y <= 0.012 && y >= -0.042) {
-      const t = (0.012 - y) / 0.054;
+    if (ly <= 0.012 && ly >= -0.042) {
+      const t = (0.012 - ly) / 0.054;
       prof = 0.0035 + 0.0275 * Math.pow(t, 1.35);
       w = 0.0068 + 0.0095 * t;
-    } else if (y < -0.042) {
-      const t = clamp((-0.042 - y) / 0.011, 0, 1);
+    } else if (ly < -0.042) {
+      const t = clamp((-0.042 - ly) / 0.011, 0, 1);
       prof = lerp(0.031, 0.004, smooth(t));
       w = 0.0163 + 0.004 * t;
     }
     d += K.nose * prof * gauss(x, w);
-    d += 0.0085 * K.alae * gauss(y + 0.046, 0.0075) * gauss(ax - 0.0165 * K.nose, 0.0068);   // Nasenflügel
-    d += K.maxilla * gauss(y + 0.07, 0.03) * gauss(x, 0.04);                     // Oberkiefer, Mundpartie
-    d += 0.0042 * K.lips * gauss(y + 0.0638, 0.0052) * gauss(x, 0.02);            // Oberlippe
-    d += 0.0052 * K.lips * gauss(y + 0.0795, 0.0058) * gauss(x, 0.0175);          // Unterlippe
-    d -= 0.0022 * gauss(y + 0.0716, 0.0022) * gauss(x, 0.024);                    // Mundspalte
-    d -= 0.0028 * gauss(y + 0.0905, 0.0055) * gauss(x, 0.024);                    // Kinnfurche
-    d += 0.022 * K.chin * gauss(y + K.chinY - 0.016, 0.016) * gauss(ax - K.chinW, 0.019);   // Kinn
+    d += K.bump * 0.0045 * gauss(ly + 0.006, 0.008) * gauss(x, 0.0075);           // Höcker (Adlernase)
+    d += 0.0085 * K.alae * gauss(ly + 0.046, 0.0075) * gauss(ax - 0.0165 * K.nose, 0.0068);   // Nasenflügel
+    d += K.maxilla * gauss(ly + 0.07, 0.03) * gauss(x, 0.04);                    // Oberkiefer, Mundpartie
+    d += K.upLip * K.lips * gauss(ly + 0.0638, 0.0052) * gauss(x, 0.02);          // Oberlippe
+    d += 0.0052 * K.lips * gauss(ly + 0.0795, 0.0058) * gauss(x, 0.0175);         // Unterlippe
+    d -= 0.0022 * gauss(ly + 0.0716, 0.0022) * gauss(x, 0.024);                   // Mundspalte
+    d -= 0.0028 * gauss(ly + 0.0905, 0.0055) * gauss(x, 0.024);                   // Kinnfurche
+    d += 0.022 * K.chin * gauss(y + K.chinY - 0.016, 0.016) * gauss(ax - K.chinW, K.chinR);   // Kinn
     d += 0.006 * K.cheek * gauss(y + 0.026, 0.026) * gauss(ax - 0.046, 0.02);     // Wangen
-    d += 0.002 * gauss(y + 0.058, 0.009) * gauss(ax - 0.028, 0.006);              // Mundwinkel-Wulst
+    d += 0.002 * gauss(ly + 0.058, 0.009) * gauss(ax - 0.028, 0.006);             // Mundwinkel-Wulst
     return d;
   }
 
   // Seitliches Relief (x, nach außen)
   function side(y, z) {
     let d = 0;
-    d += 0.0055 * K.cheek * gauss(y + 0.008, 0.016) * gauss(z - 0.046, 0.024);    // Wangenknochen
+    d += 0.0055 * K.bone * gauss(y + 0.008, 0.016) * gauss(z - 0.046, 0.024);     // Wangenknochen
     d -= 0.004 * gauss(y - 0.04, 0.02) * gauss(z - 0.042, 0.03);                  // Schläfe
     d += 0.0075 * K.jaw * gauss(y + 0.078, 0.02) * gauss(z + 0.004, 0.028);       // Kieferwinkel
-    d -= 0.002 * K.jaw * gauss(y + 0.05, 0.014) * gauss(z - 0.04, 0.02);         // Wange unter dem Knochen
+    d -= 0.002 * K.jaw * gauss(y + 0.05, 0.014) * gauss(z - 0.04, 0.02);          // Wange unter dem Knochen
     return d;
   }
 
@@ -354,14 +406,13 @@ function makeHead(sex) {
     // Kieferunterseite: weich abgeschnitten, vorn tief (Kinn), hinten hoch (Hals)
     const yu = lerp(-0.068, -K.chinY, sstep(-0.03, 0.074, z));
     y = smax(y, yu, K.edge);
-    // Relief
     const wf = sstep(0.025, 0.07, z);
-    z += wf * relief(x, y);
+    if (wf > 0) z += wf * relief(x, y);
     x += Math.sign(x) * side(y, z);
     return [x * s, y * s, z * s];
   }
 
-  // Fläche des Gesichts an (x, y) – zum Einpassen der Augen
+  // Fläche des Gesichts an (x, y) – zum Einpassen der Augen und Brauen
   function frontZ(x, y) {
     let lo = 0, hi = 0.2;
     const px = x / s, py = y / s;
@@ -387,52 +438,65 @@ const HEAD_DIR = (u, v) => {
   const phi = u * Math.PI * 2, th = v * Math.PI;
   return [Math.sin(th) * Math.sin(phi), Math.cos(th), Math.sin(th) * Math.cos(phi)];
 };
+// Richtung aus Winkeln in Grad: phi um die Hochachse (0 vorn, + zur linken Seite der Figur), th von oben
+const sph = (phi, th) => {
+  const p = (phi * Math.PI) / 180, t = (th * Math.PI) / 180;
+  return [Math.sin(t) * Math.sin(p), Math.cos(t), Math.sin(t) * Math.cos(p)];
+};
 
-// Haaransatz: Höhe über der Augenlinie je nach Winkel um den Kopf (0 = vorn)
+// Haaransatz: Höhe über der Augenlinie je nach Winkel um den Kopf (0 = vorn).
+// Etwas höher als zuvor – die Stirn ist ein Drittel des Gesichts.
 const HAIRLINE = {
-  m: [[0, 0.062], [0.5, 0.058], [0.95, 0.042], [1.22, 0.03], [1.36, -0.022], [1.5, -0.03], [1.6, 0.014], [1.95, 0.01], [2.25, -0.04], [2.65, -0.066], [Math.PI, -0.075]],
-  f: [[0, 0.064], [0.5, 0.06], [0.95, 0.045], [1.22, 0.032], [1.38, 0.0], [1.5, -0.01], [1.62, 0.012], [1.95, 0.008], [2.25, -0.045], [2.65, -0.07], [Math.PI, -0.08]],
+  m: [[0, 0.074], [0.5, 0.069], [0.95, 0.048], [1.22, 0.032], [1.36, -0.022], [1.5, -0.03], [1.6, 0.014], [1.95, 0.01], [2.25, -0.04], [2.65, -0.066], [Math.PI, -0.075]],
+  f: [[0, 0.077], [0.5, 0.071], [0.95, 0.05], [1.22, 0.034], [1.38, 0.0], [1.5, -0.01], [1.62, 0.012], [1.95, 0.008], [2.25, -0.045], [2.65, -0.07], [Math.PI, -0.08]],
 };
 
 // Linie über den Winkel um den Kopf (0 = vorn, ±π hinten) als Tabelle – schnell abzufragen
 function table(fn, n = 256) {
   const t = new Float32Array(n + 1);
   for (let i = 0; i <= n; i++) t[i] = fn((i / n) * Math.PI);
-  return (a) => {
+  const look = (arr) => (a) => {
     const f = Math.min(1, Math.abs(a) / Math.PI) * n;
     const i = Math.min(n - 1, Math.floor(f));
-    return t[i] + (t[i + 1] - t[i]) * (f - i);
+    return arr[i] + (arr[i + 1] - arr[i]) * (f - i);
   };
+  // Tiefst- und Höchstwert in einem Fenster von ±0,45 rad – damit weit entfernte Punkte schnell entschieden sind
+  const w = Math.ceil((0.45 / Math.PI) * n);
+  const lo = new Float32Array(n + 1), hi = new Float32Array(n + 1);
+  for (let i = 0; i <= n; i++) {
+    let a = Infinity, b = -Infinity;
+    for (let k = -w; k <= w; k++) {
+      let j = i + k;
+      if (j < 0) j = -j;
+      if (j > n) j = 2 * n - j;
+      a = Math.min(a, t[j]); b = Math.max(b, t[j]);
+    }
+    lo[i] = a; hi[i] = b;
+  }
+  const line = look(t);
+  line.lo = look(lo);
+  line.hi = look(hi);
+  return line;
 }
 
-const HEAD_PTS = {};
 const HEAD_FN = {};
-function headShape(sex) {
-  if (!HEAD_FN[sex]) HEAD_FN[sex] = makeHead(sex);
-  return HEAD_FN[sex];
-}
-function headPoints(sex, H) {
-  if (!HEAD_PTS[sex]) {
-    const G = HEAD_GRID, out = [];
-    for (let j = 0; j <= G.nv; j++) {
-      for (let i = 0; i < G.nu; i++) {
-        const d = HEAD_DIR(G.u[i], G.v[j]);
-        out.push(H.point(d[0], d[1], d[2]));
-      }
-    }
-    HEAD_PTS[sex] = out;
-  }
-  return HEAD_PTS[sex];
+function headShape(sex, face) {
+  const key = sex + face;
+  if (!HEAD_FN[key]) HEAD_FN[key] = makeHead(sex, face);
+  return HEAD_FN[key];
 }
 
 // Abstand eines Punkts zu einer Linie um den Kopf (Höhe je Winkel), quer zur Linie gemessen –
 // so laufen auch steile Stellen (Koteletten, Schläfen) gleichmäßig weich aus
-function lineDist(x, y, z, line) {
+function lineDist(x, y, z, line, far = 0.04) {
   const phi = Math.atan2(x, z);
+  if (line.lo) {                                   // weit über oder unter allen nahen Stellen der Linie
+    if (y > line.hi(phi) + far) return far;
+    if (y < line.lo(phi) - far) return -far;
+  }
   const r = Math.max(0.03, Math.hypot(x, z));
   const l0 = line(phi);
   let best = Math.abs(y - l0);
-  // kürzester Abstand zu Nachbarstellen der Linie (Bogenlänge auf dem Kopf)
   for (let k = 1; k <= 12; k++) {
     const da = k * 0.035;
     if (da * r > best) break;
@@ -444,7 +508,6 @@ function lineDist(x, y, z, line) {
   return y >= l0 ? best : -best;
 }
 
-// Kopf mit Gesicht, Haaren und Bart – Farben und Formen aus dem Aussehen
 const HEAD_CACHE = new Map();
 const SHAPE_CACHE = new Map();
 function cached(key, fn) {
@@ -466,37 +529,48 @@ function withColors(g, col) {
   return out;
 }
 // Haarform färben: k = Deckung (0 Haut … 1 Haar), f = Helligkeit der Strähne
-function recolor(shape, under, top) {
+function recolor(shape, under, top, cover = 1) {
   const n = shape.k.length;
   const col = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) putColor(col, i, mix(under, shade(top, shape.f[i]), shape.k[i]));
+  for (let i = 0; i < n; i++) putColor(col, i, mix(under, shade(top, shape.f[i]), shape.k[i] * cover));
   return withColors(shape.geo, col);
 }
-// Form der Kopfhaut je Geschlecht (ohne Farben)
-function headBase(sex, H) {
-  return cached(`head|${sex}`, () => {
-    const pts = headPoints(sex, H), G = HEAD_GRID;
+// Form der Kopfhaut (ohne Farben)
+function headBase(sex, face, H) {
+  return cached(`head|${sex}|${face}`, () => {
+    const G = HEAD_GRID;
     return gridSurface(G.nu, G.nv, (u, v) => {
-      const p = pts[Math.round(v * G.nv) * G.nu + Math.round(u * G.nu)];
+      const d = HEAD_DIR(G.u[Math.round(u * G.nu)], G.v[Math.round(v * G.nv)]);
+      const p = H.point(d[0], d[1], d[2]);
       return [p[0], p[1], p[2], 0];
     });
   });
 }
 // Schicht über der Haut (Haare, Bart): an der Kopfform entlang nach außen versetzt.
 // mask 0…1 bestimmt Dicke und Deckung; Dreiecke ohne Haar fallen weg.
-function layerShape(base, s, mask, thick) {
+// maskKey: die Maske hängt nur von Geschlecht und Frisur ab, nicht vom Gesicht – das Raster ist für
+// alle Gesichter gleich. Sie wird deshalb einmal am Grundgesicht berechnet und wiederverwendet.
+function maskFor(maskKey, sex, mask) {
+  return cached(maskKey, () => {
+    const H0 = headShape(sex, 0), b0 = headBase(sex, 0, H0), p0 = b0.attributes.position, s0 = H0.s;
+    const m = new Float32Array(p0.count);
+    for (let i = 0; i < p0.count; i++) m[i] = mask(p0.getX(i) / s0, p0.getY(i) / s0, p0.getZ(i) / s0);
+    return m;
+  });
+}
+function layerShape(base, s, mask, thick, maskKey, sex) {
   const G = HEAD_GRID;
   const hp = base.attributes.position, hn = base.attributes.normal;
   const n = hp.count;
-  const m = new Float32Array(n), f = new Float32Array(n);
+  const m = maskKey ? maskFor(maskKey, sex, mask) : new Float32Array(n), f = new Float32Array(n);
   const g = gridSurface(G.nu, G.nv, (u, v) => {
     const i = Math.round(v * G.nv) * G.nu + Math.round(u * G.nu) % G.nu;
     const x = hp.getX(i), y = hp.getY(i), z = hp.getZ(i);
     const X = x / s, Y = y / s, Z = z / s;
-    const k = mask(X, Y, Z);
-    m[i] = k;
+    const k = maskKey ? m[i] : (m[i] = mask(X, Y, Z));
     const phi = Math.atan2(X, Z);
-    f[i] = 0.9 + 0.07 * Math.sin(phi * 61 + Y * 30) + 0.05 * Math.sin(phi * 23 - Y * 55);   // Strähnen
+    // Strähnen, und zum Ansatz hin dunkler
+    f[i] = (0.9 + 0.07 * Math.sin(phi * 61 + Y * 30) + 0.05 * Math.sin(phi * 23 - Y * 55)) * (0.8 + 0.2 * sstep(0.1, 0.7, k));
     const t = k > 0 ? 0.0004 + thick(X, Y, Z) * k * k : 0;
     return [x + hn.getX(i) * t, y + hn.getY(i) * t, z + hn.getZ(i) * t, 0];
   }, (a, b, c) => Math.min(m[a], m[b], m[c]) > 0.002);
@@ -505,109 +579,262 @@ function layerShape(base, s, mask, thick) {
   const k = m.map((v) => sstep(0.22, 0.85, v));     // Rand hautfarben, damit die Dreieckskante nicht auffällt
   return { geo: g, k, f };
 }
+
+// Haarbüschel: flaches, sich verjüngendes Band entlang eines Wegs über die Kopfhaut.
+// way: Wegpunkte [phi, th, abstand] in Grad und Metern über der Haut. Die Büschel brechen
+// die glatte Haarkappe auf – so liest sich die Frisur auch aus der Entfernung.
+const HAIR_C0 = new THREE.Vector3(0, -0.01, -0.005);
+function strandGeo(pts, w0, w1, flat, seg = 10, rad = 6) {
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const g = new THREE.TubeGeometry(curve, seg, 1, rad, false);
+  const pos = g.attributes.position;
+  const n = new THREE.Vector3(), d = new THREE.Vector3(), c = new THREE.Vector3();
+  const ts = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const t = Math.floor(i / (rad + 1)) / seg;
+    ts[i] = t;
+    curve.getPoint(t, c);
+    n.copy(c).sub(HAIR_C0).normalize();
+    d.set(pos.getX(i), pos.getY(i), pos.getZ(i)).sub(c);
+    const along = d.dot(n);
+    d.addScaledVector(n, -along);
+    const w = lerp(w0, w1, Math.pow(t, 1.3));
+    d.multiplyScalar(w).addScaledVector(n, along * w * flat);
+    pos.setXYZ(i, c.x + d.x, c.y + d.y, c.z + d.z);
+  }
+  g.computeVertexNormals();
+  return { g, ts };
+}
+function clumpShape(H, list) {
+  const s = H.s;
+  const geos = [], fs = [];
+  let seed = 1;
+  for (const cl of list) {
+    const pts = cl.way.map(([phi, th, off]) => {
+      const d = sph(phi, th);
+      const p = H.point(d[0], d[1], d[2]);
+      const v = new THREE.Vector3(p[0], p[1], p[2]);
+      const nn = v.clone().sub(HAIR_C0.clone().multiplyScalar(s)).normalize();
+      return v.addScaledVector(nn, off * s);
+    });
+    if (cl.end) pts.push(pts[pts.length - 1].clone().add(new THREE.Vector3(...cl.end).multiplyScalar(s)));
+    const { g, ts } = strandGeo(pts, cl.w * s, cl.tip * cl.w * s, cl.flat);
+    seed = (seed * 16807) % 2147483647;
+    const lift = 0.94 + 0.12 * (seed / 2147483647);
+    geos.push(g);
+    for (const t of ts) fs.push((0.8 + 0.24 * Math.min(1, t * 1.6)) * lift);
+  }
+  const geo = merge(geos.map((g) => ({ geo: g, color: 0 })));
+  geo.deleteAttribute('color');
+  const f = Float32Array.from(fs);
+  return { geo, f, k: new Float32Array(f.length).fill(1) };
+}
+
+// Zopf aus geflochtenen Gliedern entlang eines Wegs
+function braidShape(pts, w) {
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const geos = [], fs = [];
+  const n = 9;
+  const tan = new THREE.Vector3(), p = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    curve.getPoint(t, p);
+    curve.getTangent(t, tan);
+    const r = w * (1 - 0.35 * t);
+    const g = ellipsoid(r, r * 1.5, r * 0.9, 8, 6);
+    g.rotateZ((i % 2 ? 1 : -1) * 0.45);
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan.clone().negate());
+    g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(q));
+    g.translate(p.x, p.y, p.z);
+    geos.push(g);
+    for (let k = 0; k < g.attributes.position.count; k++) fs.push(0.9 + 0.1 * (i % 2));
+  }
+  const geo = merge(geos.map((g) => ({ geo: g, color: 0 })));
+  geo.deleteAttribute('color');
+  const f = Float32Array.from(fs);
+  return { geo, f, k: new Float32Array(f.length).fill(1) };
+}
+
+// Büschel je Frisur. Wegpunkte: [phi, th, Abstand über der Haut]. Die Büschel liegen flach an
+// und laufen spitz ins übrige Haar aus (letzter Wegpunkt knapp über der Haut, also unter der Haarkappe).
+function hairClumps(sex, style) {
+  const L = [];
+  const add = (way, w, more = {}) => L.push({ way, w, tip: 0.3, flat: 0.5, ...more });
+  if (sex === 'm') {
+    if (style === 0) {                    // Kurz: Stirnhaare zur Seite gestrichen, oben locker
+      for (let k = 0; k < 6; k++) { const p = -38 + k * 15; add([[p + 6, 12, 0.009], [p - 4, 27, 0.011], [p - 12, 41, 0.004]], 0.016); }
+      for (let k = 0; k < 7; k++) { const p = 75 + k * 35; add([[p * 0.3, 8, 0.01], [p, 32, 0.01], [p + 8, 58, 0.004]], 0.018); }
+    } else if (style === 1) {             // Zopf: straff nach hinten gekämmt
+      for (let k = 0; k < 8; k++) { const p = -52 + k * 15; add([[p, 32, 0.003], [p * 0.6, 14, 0.01], [180 - p * 0.35, 30, 0.009], [180 - p * 0.15, 76, 0.004]], 0.015); }
+    } else if (style === 2) {             // Lang: Mittelscheitel, Strähnen fallen nach hinten zu den Seiten
+      for (let k = 0; k < 5; k++) for (const sd of [-1, 1]) { const p = 62 + k * 26; add([[sd * 3, 8 + k * 3, 0.011], [sd * p, 30, 0.012], [sd * (p + 8), 50, 0.003]], 0.019); }
+    } else if (style === 4) {             // Strubbel: gestufte Büschel, nach vorn und oben gekämmt
+      for (let k = 0; k < 18; k++) {
+        const p = -70 + ((k * 53) % 260), th = 4 + ((k * 23) % 40);
+        add([[p, Math.min(46, th + 18), 0.003], [p + 3, th + 7, 0.013], [p + 6, th - 3, 0.017]], 0.019, { tip: 0.22, flat: 0.6 });
+      }
+    }
+  } else {
+    if (style === 0) {                    // Lang: Seitenscheitel
+      for (let k = 0; k < 4; k++) add([[22, 9 + k * 3, 0.012], [-25 - k * 10, 32, 0.013], [-60 - k * 9, 56, 0.004]], 0.019);
+      for (let k = 0; k < 3; k++) add([[22, 11 + k * 3, 0.012], [55 + k * 10, 34, 0.013], [85 + k * 10, 58, 0.004]], 0.019);
+      for (let k = 0; k < 5; k++) { const p = 115 + k * 30; add([[25, 12, 0.011], [p, 38, 0.013], [p + 4, 62, 0.004]], 0.021); }
+    } else if (style === 1 || style === 2) {   // Pferdeschwanz, Dutt: nach hinten zusammengenommen
+      const back = style === 1 ? 82 : 46;
+      for (let k = 0; k < 9; k++) { const p = -60 + k * 15; add([[p, 33, 0.003], [p * 0.55, 16, 0.01], [180 - p * 0.3, 32, 0.01], [180 - p * 0.08, back, 0.006]], 0.016, { tip: 0.5 }); }
+    } else if (style === 3) {             // Bob mit Pony
+      for (let k = 0; k < 7; k++) { const p = -42 + k * 14; add([[p * 0.4, 10, 0.012], [p, 34, 0.015], [p * 1.04, 51, 0.009]], 0.018, { tip: 0.55, flat: 0.6 }); }
+      for (let k = 0; k < 8; k++) { const p = 62 + k * 34; add([[p * 0.2, 8, 0.012], [p, 40, 0.014], [p, 66, 0.005]], 0.022); }
+    } else if (style === 4) {             // Zöpfe: Mittelscheitel, nach hinten zu den Zöpfen
+      for (let k = 0; k < 4; k++) for (const sd of [-1, 1]) { const p = 25 + k * 25; add([[sd * 2, 14 + k * 3, 0.009], [sd * (p + 20), 46, 0.01], [sd * (112 + k * 6), 92, 0.005]], 0.017); }
+    }
+  }
+  return L;
+}
+
+// Kopf mit Gesicht, Haaren und Bart – Farben und Formen aus dem Aussehen
 function buildHead(look, skin, hair) {
   const key = JSON.stringify(look);
   if (!HEAD_CACHE.has(key)) HEAD_CACHE.set(key, buildHeadNow(look, skin, hair));
   return HEAD_CACHE.get(key);
 }
 function buildHeadNow(look, skin, hair) {
-  const H = headShape(look.sex);
   const female = look.sex === 'f';
+  const fc = look.face;
+  const H = headShape(look.sex, fc);
+  const K = H.K;
   const s = H.s;
-  const G = HEAD_GRID;
-  const red = mix(skin, 0xc4524a, 0.22);
+  const red = mix(skin, 0xc4524a, 0.24);
   const lipCol = female ? mix(skin, 0xb04452, 0.62) : mix(skin, 0x9a4f45, 0.4);
+  const LY = (Y) => (Y < 0 ? Y / K.low : Y);
 
-  const skinColor = (x, y, z) => {
-    const X = x / s, Y = y / s, ax = Math.abs(X);
-    if (z / s < 0.01) return Y < -0.1 ? shade(skin, 1 - 0.16 * sstep(-0.1, -0.124, Y)) : skin;   // Hinterkopf: nichts zu malen
-    let c = skin;
-    c = mix(c, red, 0.5 * gauss(ax - 0.046, 0.02) * gauss(Y + 0.028, 0.024));    // Wangen
-    c = mix(c, red, 0.45 * gauss(X, 0.012) * gauss(Y + 0.04, 0.012));             // Nasenspitze
-    // Lippen
-    const up = (ax / 0.0235) ** 2 + ((Y + 0.065) / 0.0062) ** 2;
-    const lo = (ax / 0.0195) ** 2 + ((Y + 0.0785) / 0.0072) ** 2;
-    c = mix(c, lipCol, 1 - sstep(0.6, 1.25, Math.min(up, lo)));
-    c = mix(c, shade(lipCol, 0.45), 0.85 * gauss(Y + 0.0716, 0.0016) * gauss(X, 0.021));   // Mundspalte
-    // Schatten: Augenhöhle, unter der Nase, unter dem Kinn
-    let ao = 1;
-    ao -= 0.1 * gauss(ax - EYE.x, 0.016) * gauss(Y - 0.004, 0.014);
-    ao -= 0.35 * gauss(ax - 0.0085, 0.004) * gauss(Y + 0.0505, 0.0035);          // Nasenlöcher
-    ao -= 0.12 * gauss(X, 0.012) * gauss(Y + 0.054, 0.004);
-    ao -= 0.16 * sstep(-0.1, -0.124, Y) * (1 - sstep(0.03, 0.08, z / s));         // unter dem Kiefer
-    return shade(c, ao);
-  };
-
-  // Kopfhaut: Form je Geschlecht, Farbe je Hautton – beides zwischengespeichert
-  const base = headBase(look.sex, H);
-  const head = cached(`skin|${look.sex}|${look.skin}`, () => {
+  // Hautfarbe: Gewichte (Durchblutung, Lippen, Mundspalte, Lidfalte, Schatten) hängen nur vom
+  // Gesicht ab und werden einmal berechnet; der Hautton färbt dann nur noch ein.
+  const base = headBase(look.sex, fc, H);
+  const W = cached(`skinw|${look.sex}|${fc}`, () => {
     const pos = base.attributes.position;
-    const col = new Float32Array(pos.count * 3);
-    for (let i = 0; i < pos.count; i++) putColor(col, i, skinColor(pos.getX(i), pos.getY(i), pos.getZ(i)));
+    const w = new Float32Array(pos.count * 5);
+    for (let i = 0; i < pos.count; i++) {
+      const X = pos.getX(i) / s, Y = pos.getY(i) / s, Z = pos.getZ(i) / s, ax = Math.abs(X);
+      let ao = 1, rd = 0, lip = 0, mouth = 0, crease = 0;
+      if (Z < 0.01) {
+        if (Y < -0.1) ao -= 0.16 * sstep(-0.1, -0.124, Y);
+      } else {
+        const ly = LY(Y);
+        // durchblutete Stellen: Wangen, Nasenspitze, Kinn – wärmer, nicht grauer
+        const r1 = 0.5 * gauss(ax - 0.046, 0.02) * gauss(Y + 0.028, 0.024);
+        const r2 = 0.45 * gauss(X, 0.012) * gauss(ly + 0.04, 0.012);
+        const r3 = 0.3 * gauss(X, 0.02) * gauss(Y + K.chinY - 0.018, 0.012);
+        rd = 1 - (1 - r1) * (1 - r2) * (1 - r3);
+        const up = (ax / 0.0235) ** 2 + ((ly + 0.065) / 0.0062) ** 2;
+        const lo = (ax / 0.0195) ** 2 + ((ly + 0.0785) / 0.0072) ** 2;
+        lip = 1 - sstep(0.6, 1.25, Math.min(up, lo));
+        mouth = 0.85 * gauss(ly + 0.0716, 0.0016) * gauss(X, 0.021);
+        crease = (female ? 0.45 : 0.3) * gauss(ax - EYE.x, 0.013) * gauss(Y - 0.0135, 0.0028);     // Lidfalte
+        ao -= 0.1 * gauss(ax - EYE.x, 0.016) * gauss(Y - 0.004, 0.014);
+        ao -= 0.35 * gauss(ax - 0.0085, 0.004) * gauss(ly + 0.0505, 0.0035);       // Nasenlöcher
+        ao -= 0.12 * gauss(X, 0.012) * gauss(ly + 0.054, 0.004);
+        ao -= 0.16 * sstep(-0.1, -0.124, Y) * (1 - sstep(0.03, 0.08, Z));          // unter dem Kiefer
+      }
+      w.set([rd, lip, mouth, crease, ao], i * 5);
+    }
+    return w;
+  });
+  const head = cached(`skin|${look.sex}|${fc}|${look.skin}`, () => {
+    const n = W.length / 5;
+    const col = new Float32Array(n * 3);
+    const mouthCol = shade(lipCol, 0.45), creaseCol = shade(skin, 0.78);
+    for (let i = 0; i < n; i++) {
+      const o = i * 5;
+      let c = mix(skin, red, W[o]);
+      c = mix(c, lipCol, W[o + 1]);
+      c = mix(c, mouthCol, W[o + 2]);
+      c = mix(c, creaseCol, W[o + 3]);
+      putColor(col, i, shade(c, W[o + 4]));
+    }
     return withColors(base, col);
   });
   const parts = [{ geo: head }];
   const st = look.style;
   const longHair = female ? st === 0 : st === 2;
+  const bob = female && st === 3;
+  const bald = !female && st === 3;
 
-  // Haare auf dem Kopf
-  const scalp = cached(`hair|${look.sex}|${st}`, () => {
+  // Haarkappe (bei der Glatze nur ein Haarkranz an Seiten und Hinterkopf)
+  const scalp = cached(`hair|${look.sex}|${fc}|${st}`, () => {
     const hl = HAIRLINE[look.sex];
     const scalpLine = table((a) => {
       const l = piecewise(hl, a);
-      return longHair && a > 1.3 ? Math.min(l, -0.05) : l;               // lange Haare bedecken die Ohren
+      if (bald) return a < 1.25 ? 0.2 : l;
+      return (longHair || bob) && a > 1.3 ? Math.min(l, -0.05) : l;     // lange Haare bedecken die Ohren
     });
     return layerShape(base, s,
-      (x, y, z) => sstep(-0.006, 0.024, lineDist(x, y, z, scalpLine)),
       (x, y, z) => {
+        let k = sstep(-0.006, 0.024, lineDist(x, y, z, scalpLine));
+        if (bald) k *= 1 - sstep(0.018, 0.042, y);                       // oben kahl: Haarkranz
+        return k;
+      },
+      (x, y, z) => {
+        if (bald) return 0.0022;
         let t = (female ? 0.006 : 0.0045) + (female ? 0.011 : 0.0085) * sstep(-0.02, 0.1, y);
-        if (longHair) t += 0.004;
-        if (!female && st === 0) t += 0.002 * sstep(0.04, 0.0, z);          // kurz: oben etwas voller
-        if (female) t *= 1 - 0.3 * gauss(x - 0.016, 0.005) * sstep(0.06, 0.1, y) * sstep(-0.03, 0.03, z);   // Scheitel
+        if (longHair || bob) t += 0.004;
+        if (!female && st === 0) t += 0.002 * sstep(0.04, 0.0, z);
+        if (!female && st === 4) t += 0.003;
         return t;
-      });
+      }, `hairmask|${look.sex}|${st}`, look.sex);
   });
-  parts.push({ geo: recolor(scalp, skin, hair) });
+  parts.push({ geo: recolor(scalp, skin, hair, bald ? 0.85 : 1) });
 
-  // Bart: Kinn, Kiefer, Oberlippe – Lippen bleiben frei
+  // Haarbüschel
+  const clumps = hairClumps(look.sex, st);
+  if (clumps.length) parts.push({ geo: recolor(cached(`clumps|${look.sex}|${fc}|${st}`, () => clumpShape(H, clumps)), skin, hair) });
+
+  // Bart: 1 Vollbart, 2 Kinnbart, 3 Stoppeln – die Lippen bleiben frei
   if (!female && look.beard) {
-    const beard = cached('beard', () => {
+    const kind = look.beard;
+    const beard = cached(`beard|${fc}|${kind}`, () => {
       const beardLine = table((a) => piecewise([[0, -0.051], [0.3, -0.049], [0.55, -0.056], [0.85, -0.042], [1.2, -0.022], [1.4, -0.006], [1.5, -0.01], [1.62, -0.07]], a));
       return layerShape(base, s,
         (x, y, z) => {
           if (y > 0.01) return 0;
           let k = sstep(0.006, -0.012, lineDist(x, y, z, beardLine));
           if (y < -0.064 && z > -0.03) k = Math.max(k, sstep(-0.064, -0.08, y) * sstep(-0.03, 0.0, z));   // unter dem Kiefer
-          const lips = (x / 0.027) ** 2 + ((y + 0.0718) / 0.0118) ** 2;
-          return k * sstep(0.85, 1.35, lips);
+          const ly = LY(y);
+          const lips = (x / 0.027) ** 2 + ((ly + 0.0718) / 0.0118) ** 2;
+          k *= sstep(0.85, 1.35, lips);
+          if (kind === 2) k *= 1 - sstep(0.024, 0.034, Math.abs(x));      // nur um Mund und Kinn
+          return k;
         },
-        (x, y) => 0.004 + 0.0075 * sstep(-0.075, -0.125, y));
+        (x, y) => (kind === 3 ? 0.0009 : 0.004 + 0.0075 * sstep(-0.075, -0.125, y)), `beardmask|${kind}`, 'm');
     });
-    parts.push({ geo: recolor(beard, skin, shade(hair, 0.92)) });
+    parts.push({ geo: recolor(beard, skin, shade(hair, 0.92), kind === 3 ? 0.26 : 1) });
   }
 
-  // Lange Haare fallen hinten und seitlich herab
-  if (longHair) {
-    const drape = cached(`drape|${look.sex}`, () => {
-      const end = female ? -0.215 : -0.135;
-      const span = female ? 1.12 : 1.3;                  // ab diesem Winkel (vorn = 0) beginnt der Vorhang
-      const nu = 40, nv = 16;
+  // Herabfallendes Haar: lang (bis über die Schultern) oder Bob (bis zum Kinn)
+  if (longHair || bob) {
+    const drape = cached(`drape|${look.sex}|${fc}|${bob ? 'bob' : 'lang'}`, () => {
+      const end = bob ? -0.088 : female ? -0.215 : -0.135;
+      const span = bob ? 0.95 : female ? 1.12 : 1.3;      // ab diesem Winkel (vorn = 0) beginnt der Vorhang
+      const nu = 48, nv = 16;
       const pos = [], idx = [];
       const f = [];
       for (let j = 0; j <= nv; j++) {
         for (let i = 0; i <= nu; i++) {
           const phi = span + (i / nu) * (Math.PI * 2 - 2 * span);
           const t = j / nv;
-          const yRel = lerp(0.085, end, t);
-          const d = H.point(Math.sin(phi), Math.max(yRel, -0.06) / (yRel > 0 ? 0.1 : 0.12), Math.cos(phi));   // Kopfhaut in dieser Richtung
+          // ausgefranster Saum: Strähnen enden unterschiedlich lang
+          const jag = (bob ? 0.006 : 0.016) * (Math.abs(Math.sin(phi * 7.5)) - 0.5 + 0.4 * Math.sin(phi * 3.1));
+          const yRel = lerp(0.085, end + jag, t);
+          const d = H.point(Math.sin(phi), Math.max(yRel, -0.06) / (yRel > 0 ? 0.1 : 0.12), Math.cos(phi));
           const r0 = Math.hypot(d[0], d[2]) / s;
           const below = sstep(-0.04, end, yRel);
-          const r = r0 + lerp(0.006, 0.013, sstep(0.085, 0.03, yRel)) + 0.016 * below + 0.003 * Math.sin(phi * 13 + t * 3) * below;
+          const ridge = 0.004 * Math.abs(Math.sin(phi * 9 + 0.5)) + 0.002 * Math.sin(phi * 21);
+          const r = r0 + lerp(0.006, 0.013, sstep(0.085, 0.03, yRel)) + (bob ? 0.008 : 0.016) * below + ridge * (0.4 + below);
           let x = Math.sin(phi) * r, z = Math.cos(phi) * r;
-          z -= 0.012 * below;
-          x *= 1 - 0.08 * below;
+          z -= (bob ? 0.004 : 0.012) * below;
+          x *= 1 - (bob ? -0.04 : 0.08) * below;
           pos.push(x * s, yRel * s, z * s);
-          f.push(0.88 + 0.08 * Math.sin(phi * 47 + t * 2) + 0.04 * Math.sin(phi * 19) + 0.06 * t);
+          f.push((0.86 + 0.08 * Math.sin(phi * 47 + t * 2) + 0.04 * Math.sin(phi * 19) + 0.08 * t) * (0.97 + 0.06 * Math.abs(Math.sin(phi * 9 + 0.5))));
         }
       }
       for (let j = 0; j < nv; j++) {
@@ -623,10 +850,23 @@ function buildHeadNow(look, skin, hair) {
       return { geo: g, f: Float32Array.from(f), k: new Float32Array(f.length).fill(1) };
     });
     parts.push({ geo: recolor(drape, skin, hair) });
-    if (female) {        // zwei Strähnen vorn, die das Gesicht rahmen
+    if (female && !bob) {        // zwei Strähnen vorn, die das Gesicht rahmen
       for (const sx of [-1, 1]) {
-        parts.push({ geo: limbShape(0.17, [[0, 0.016], [0.5, 0.019], [1, 0.012]], 1.4, 0.8, 8), m: at(sx * 0.071 * s, 0.03 * s, 0.012 * s, 0.05, 0, sx * 0.05), color: shade(hair, 0.95) });
+        parts.push({ geo: limbShape(0.17, [[0, 0.016], [0.5, 0.019], [1, 0.01]], 1.4, 0.8, 8), m: at(sx * 0.071 * s, 0.03 * s, 0.012 * s, 0.05, 0, sx * 0.05), color: shade(hair, 0.95) });
       }
+    }
+  }
+
+  // Zöpfe: zwei geflochtene Zöpfe hinter den Ohren
+  if (female && st === 4) {
+    for (const sx of [-1, 1]) {
+      const root = H.point(...sph(sx * 118, 100));
+      const r = new THREE.Vector3(root[0], root[1], root[2]).add(new THREE.Vector3(sx * 0.008, 0, -0.006));
+      const pts = [r, r.clone().add(new THREE.Vector3(sx * 0.012, -0.07, -0.015)), r.clone().add(new THREE.Vector3(sx * 0.018, -0.16, -0.012)), r.clone().add(new THREE.Vector3(sx * 0.016, -0.25, 0.0))];
+      parts.push({ geo: recolor(cached(`braid|${fc}|${sx}`, () => braidShape(pts, 0.017 * s)), skin, hair) });
+      const endP = pts[3];
+      parts.push({ geo: new THREE.TorusGeometry(0.009 * s, 0.003 * s, 4, 10).rotateX(Math.PI / 2), m: at(endP.x, endP.y + 0.004, endP.z), color: CLOTH.leather });
+      parts.push({ geo: ellipsoid(0.008 * s, 0.022 * s, 0.007 * s, 8, 6), m: at(endP.x, endP.y - 0.02 * s, endP.z), color: shade(hair, 1.04) });
     }
   }
 
@@ -641,54 +881,55 @@ function buildHeadNow(look, skin, hair) {
       if (y < -0.018) { x *= 1.3; z *= 0.85; }                                         // Läppchen
       pos.setXYZ(i, sx * x, y, z);
     }
-    if (sx < 0) {                                   // gespiegelt: Dreiecke umdrehen
+    if (sx < 0) {
       const ix = ear.index;
       for (let i = 0; i < ix.count; i += 3) { const t = ix.getX(i); ix.setX(i, ix.getX(i + 2)); ix.setX(i + 2, t); }
     }
     ear.computeVertexNormals();
     const cx = c[0] + sx * 0.003 * s;
     parts.push({ geo: ear, m: at(cx - sx * 0.002 * s, c[1] + 0.004 * s, c[2] + 0.006 * s, 0, sx * 0.22, sx * 0.05, s),
-      color: (x, y, z) => shade(mix(skin, red, 0.2), 1 - 0.18 * gauss(y - c[1] - 0.004 * s, 0.012) * gauss(z - c[2] - 0.006 * s, 0.009)) });
+      color: (x, y, z) => shade(mix(skin, red, 0.3), 1 - 0.18 * gauss(y - c[1] - 0.004 * s, 0.012) * gauss(z - c[2] - 0.006 * s, 0.009)) });
   }
 
-  // Augenbrauen: flacher, sich verjüngender Strang entlang des Brauenbogens
+  // Augenbrauen: Frau schmal, hoch und gebogen – Mann kräftig, gerade und tiefer
   for (const sx of [-1, 1]) {
     const pts = [];
     for (let i = 0; i <= 6; i++) {
       const t = i / 6;
       const x = 0.011 + 0.04 * t;
-      const y = 0.0235 + (female ? 0.01 : 0.0055) * Math.sin(Math.PI * Math.min(1, t * 1.15)) - (female ? 0.001 : 0) - 0.004 * t * t;
+      const y = female
+        ? 0.027 + 0.011 * Math.sin(Math.PI * Math.min(1, t * 1.2)) - 0.005 * t * t
+        : 0.0235 + 0.0035 * Math.sin(Math.PI * Math.min(1, t * 1.15)) - 0.003 * t * t;
       pts.push(new THREE.Vector3(sx * x * s, y * s, H.frontZ(x * s, y * s) + 0.0006));
     }
     const curve = new THREE.CatmullRomCurve3(pts);
     const g = new THREE.TubeGeometry(curve, 14, 1, 6, false);
     const pos = g.attributes.position;
     for (let i = 0; i < pos.count; i++) {
-      // Rohr zu einem flachen Band machen: Dicke nach innen kräftig, außen fein
       const t = Math.floor(i / 7) / 14;
       const c = curve.getPoint(t);
-      const w = (female ? 0.0028 : 0.0046) * (1 - 0.55 * t) * s;
+      const w = (female ? 0.0026 : 0.005) * (1 - (female ? 0.6 : 0.45) * t) * s;
       const dx = pos.getX(i) - c.x, dy = pos.getY(i) - c.y, dz = pos.getZ(i) - c.z;
       pos.setXYZ(i, c.x + dx * w, c.y + dy * w * 0.85, c.z + dz * w * 0.22);
     }
     g.computeVertexNormals();
-    parts.push({ geo: g, color: shade(hair, 0.9) });
+    parts.push({ geo: g, color: shade(hair, 0.88) });
   }
 
-  // Unterlider: schließen die Augen unten ab
+  // Unterlider: Rand auf Höhe des unteren Irisrands
   const ez = H.frontZ(EYE.x * s, EYE.y * s) - 0.0045 * s;
-  const er = EYE.r * s * (female ? 1.05 : 1);
+  const er = EYE.r * s * (female ? 1.04 : 1);
   for (const sx of [-1, 1]) {
     parts.push({ geo: new THREE.SphereGeometry(er * 1.07, 14, 5, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5),
-      m: at(sx * EYE.x * s, EYE.y * s, ez, 0.4, 0, 0), color: shade(skin, 0.94) });
+      m: at(sx * EYE.x * s, EYE.y * s, ez, 0.47, 0, 0), color: (x, y) => (y > EYE.y * s - er * 0.52 ? shade(skin, female ? 0.72 : 0.85) : shade(skin, 0.94)) });
   }
 
-  // Zopf und Dutt
+  // Zopf (Mann), Pferdeschwanz, Dutt
   const extra = [];
-  if (!female && st === 1) extra.push({ geo: limbShape(0.2, [[0, 0.028], [0.6, 0.024], [1, 0.016]], 1, 1, 10), color: hair }, { geo: new THREE.TorusGeometry(0.025, 0.006, 5, 10).rotateX(Math.PI / 2), m: at(0, -0.035, 0), color: CLOTH.leather });
+  if (!female && st === 1) extra.push({ geo: limbShape(0.2, [[0, 0.028], [0.6, 0.024], [1, 0.016]], 1, 1, 10), color: (x, y, z) => shade(hair, 0.92 + 0.08 * Math.sin(Math.atan2(x, z) * 7 + y * 40)) }, { geo: new THREE.TorusGeometry(0.025, 0.006, 5, 10).rotateX(Math.PI / 2), m: at(0, -0.035, 0), color: CLOTH.leather });
   if (female && st === 1) extra.push({ geo: limbShape(0.26, [[0, 0.03], [0.3, 0.028], [0.75, 0.02], [1, 0.01]], 1, 0.85, 10), color: (x, y, z) => shade(hair, 0.92 + 0.08 * Math.sin(Math.atan2(x, z) * 7 + y * 40)) }, { geo: new THREE.TorusGeometry(0.027, 0.007, 5, 10).rotateX(Math.PI / 2), m: at(0, -0.035, 0), color: CLOTH.leather });
   if (female && st === 2) {
-    parts.push({ geo: ellipsoid(0.052, 0.046, 0.044, 14, 10), m: at(0, 0.055 * s, -0.105 * s), color: (x, y, z) => shade(hair, 0.92 + 0.08 * Math.sin(Math.atan2(y - 0.05, x) * 9)) });
+    parts.push({ geo: ellipsoid(0.052, 0.046, 0.044, 14, 10), m: at(0, 0.055 * s, -0.105 * s), color: (x, y, z) => shade(hair, 0.9 + 0.1 * Math.sin(Math.atan2(y - 0.05, x) * 9)) });
     parts.push({ geo: new THREE.TorusGeometry(0.04, 0.008, 5, 12), m: at(0, 0.05 * s, -0.082 * s, 0.35), color: CLOTH.leather });
   }
 
@@ -698,34 +939,42 @@ function buildHeadNow(look, skin, hair) {
     H, ez, er,
   };
 }
-const Z_FRONT = (z, s) => z / s > 0.04;
 
-// Augen: Augapfel mit Iris und Pupille; Oberlider sind ein eigenes Netz (Blinzeln)
-const EYE_MAT = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 90, specular: 0x9a9a9a });
-function buildEyes(s, ez, er, skin, female) {
-  const iris = 0x4a3220;
-  const eyes = merge([-1, 1].map((sx) => {
-    const cx = sx * EYE.x * s, cy = EYE.y * s;
-    return {
-      geo: new THREE.SphereGeometry(er, 16, 12), m: at(cx, cy, ez),
+// Augen: ein Augapfel mit Iris, Pupille, Lidschatten und Glanzpunkt – zweimal verwendet,
+// damit beide Augen sich bewegen können. Oberlider sind ein eigenes Netz (Blinzeln).
+const IRIS = [0x4a3220, 0x6b4a2a, 0x3c5a6e, 0x51653a, 0x5f6670];
+const EYE_MAT = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 90, specular: 0x9a9a9a, emissive: 0x141210 });
+function eyeColor(look) {
+  if (look.skin >= 3 || look.hair === 0) return IRIS[(look.face + look.hair) % 2];       // dunkel: braun
+  return IRIS[(look.hair * 3 + look.skin + look.face * 2) % IRIS.length];
+}
+function buildEyes(look, s, er, skin) {
+  const female = look.sex === 'f';
+  const iris = eyeColor(look);
+  const eye = merge([
+    {
+      geo: new THREE.SphereGeometry(er, 18, 14),
       color: (x, y, z) => {
-        const d = Math.hypot(x - cx, y - cy);
-        if (z < ez + er * 0.8) return 0xe6ddd2;
-        if (d < er * 0.21) return 0x0b0a09;
-        if (d < er * 0.44) return mix(shade(iris, 1.25), shade(iris, 0.6), d / (er * 0.44));
-        if (d < er * 0.5) return 0x2a1d14;
-        return 0xe9e1d6;
+        const d = Math.hypot(x, y);
+        let c;
+        if (z < er * 0.8) c = 0xe2d9cd;
+        else if (d < er * 0.21) c = 0x0b0a09;
+        else if (d < er * 0.44) c = mix(shade(iris, 1.3), shade(iris, 0.65), d / (er * 0.44));
+        else if (d < er * 0.5) c = shade(iris, 0.45);
+        else c = 0xe9e1d6;
+        return shade(c, 1 - 0.35 * sstep(-0.05 * er, 0.6 * er, y));    // Schatten des Oberlids
       },
-    };
-  }));
-  // Oberlid: obere Halbschale, dreht sich um die Augenachse nach unten
-  const lash = female ? 0x1a1310 : 0x2e2219;
+    },
+    // Glanzpunkt oben außen auf der Hornhaut
+    { geo: new THREE.SphereGeometry(er * 0.1, 6, 4), m: at(er * 0.22, er * 0.24, er * 0.97), color: 0xffffff },
+  ]);
+  const lash = female ? 0x15100d : 0x2e2219;
   const lids = merge([-1, 1].map((sx) => ({
     geo: new THREE.SphereGeometry(er * 1.09, 16, 6, 0, Math.PI * 2, 0, Math.PI * 0.5),
     m: at(sx * EYE.x * s, 0, 0),
-    color: (x, y) => (y < er * (female ? 0.13 : 0.08) ? lash : shade(skin, female ? 0.9 : 0.96)),
+    color: (x, y) => (y < er * (female ? 0.16 : 0.09) ? lash : shade(skin, female ? 0.9 : 0.96)),
   })));
-  return { eyes, lids };
+  return { eye, lids };
 }
 
 // ---------------------------------------------------------------------------
@@ -735,7 +984,7 @@ function buildEyes(s, ez, er, skin, female) {
 // ---------------------------------------------------------------------------
 const BODY = {
   m: {
-    hip: 1.005, waist: 0.10, chest: 0.25, neck: 0.25, head: 0.098,
+    hip: 1.005, waist: 0.10, chest: 0.25, neck: 0.25, head: 0.105,
     thigh: 0.47, shin: 0.45, upper: 0.30, fore: 0.27,
     shoulderX: 0.178, shoulderY: 0.183, legX: 0.096,
     neckR: 0.056, pelvisR: 0.158, hem: -0.17,
@@ -746,13 +995,13 @@ const BODY = {
     shinK: [[0, 0.063], [0.22, 0.066], [0.5, 0.056], [0.8, 0.043], [1, 0.04]],
     upperK: [[0, 0.054], [0.14, 0.058], [0.4, 0.051], [0.62, 0.05], [0.88, 0.043], [1, 0.042]],
     foreK: [[0, 0.044], [0.18, 0.049], [0.5, 0.041], [0.85, 0.031], [1, 0.03]],
-    hand: 1,
+    hand: 1.1,
   },
   f: {
-    hip: 0.97, waist: 0.10, chest: 0.23, neck: 0.235, head: 0.092,
+    hip: 0.97, waist: 0.10, chest: 0.23, neck: 0.235, head: 0.106,
     thigh: 0.455, shin: 0.43, upper: 0.28, fore: 0.25,
     shoulderX: 0.152, shoulderY: 0.168, legX: 0.098,
-    neckR: 0.046, pelvisR: 0.172, hem: -0.25,
+    neckR: 0.043, pelvisR: 0.172, hem: -0.25,
     torso: [[0.00, 0.148, 0.088, 0.088], [0.07, 0.132, 0.082, 0.074], [0.13, 0.126, 0.082, 0.072], [0.22, 0.142, 0.09, 0.08],
             [0.30, 0.152, 0.094, 0.085], [0.37, 0.155, 0.09, 0.086], [0.41, 0.145, 0.082, 0.082], [0.44, 0.104, 0.066, 0.07],
             [0.458, 0.06, 0.05, 0.05], [0.47, 0.048, 0.044, 0.045]],
@@ -760,22 +1009,39 @@ const BODY = {
     shinK: [[0, 0.057], [0.22, 0.06], [0.5, 0.05], [0.8, 0.038], [1, 0.036]],
     upperK: [[0, 0.045], [0.14, 0.047], [0.4, 0.043], [0.62, 0.041], [0.88, 0.036], [1, 0.035]],
     foreK: [[0, 0.037], [0.18, 0.04], [0.5, 0.034], [0.85, 0.026], [1, 0.025]],
-    hand: 0.88,
+    hand: 0.96,
   },
 };
 
+// Statur: schlank, normal, kräftig – Rumpf breiter und tiefer, Glieder dicker
+const HEAD_SCALE = 1.06;            // Kopf etwas größer als echt: auf dem iPad besser zu erkennen
+function bodyDims(sex, build) {
+  return cached(`dims|${sex}|${build}`, () => {
+    const B0 = BODY[sex];
+    const wide = [0.92, 1, 1.09][build], thick = [0.9, 1, 1.12][build];
+    const r = (k) => k.map(([t, v]) => [t, v * thick]);
+    return {
+      ...B0,
+      torso: B0.torso.map(([y, w, f, b]) => [y, w * wide, f * (1 + (wide - 1) * 0.9), b * (1 + (wide - 1) * 0.8)]),
+      thighK: r(B0.thighK), shinK: r(B0.shinK), upperK: r(B0.upperK), foreK: r(B0.foreK),
+      shoulderX: B0.shoulderX * (1 + (wide - 1) * 0.65), neckR: B0.neckR * (1 + (thick - 1) * 0.7),
+      pelvisR: B0.pelvisR * (1 + (wide - 1) * 0.6), hand: B0.hand * (1 + (thick - 1) * 0.4),
+    };
+  });
+}
+
 // Rumpf aus Querschnitten (vorn flacher, an den Seiten kantiger als eine Ellipse)
 // Form je Geschlecht; kind (0 Haut, 1 Borte, 2 Tunika) und f (Falten) je Eckpunkt zum Einfärben
-function torsoShape(sex) {
-  return cached(`torso|${sex}`, () => {
+function torsoShape(sex, build) {
+  return cached(`torso|${sex}|${build}`, () => {
     const kind = [], fac = [];
-    const geo = torsoGeo(BODY[sex], sex === 'f', kind, fac);
+    const geo = torsoGeo(bodyDims(sex, build), sex === 'f', kind, fac);
     geo.deleteAttribute('color');
     return { geo, kind, fac };
   });
 }
-function torsoColored(sex, tunic, skin) {
-  const T = torsoShape(sex);
+function torsoColored(sex, build, tunic, skin) {
+  const T = torsoShape(sex, build);
   const n = T.kind.length;
   const col = new Float32Array(n * 3);
   const dark = shade(tunic, 0.7);
@@ -845,7 +1111,8 @@ const CHAR_GEO_CACHE = new Map();
 function buildParts(look, tunicHex) {
   const key = JSON.stringify(look) + tunicHex;
   if (CHAR_GEO_CACHE.has(key)) return CHAR_GEO_CACHE.get(key);
-  const B = BODY[look.sex];
+  const B = bodyDims(look.sex, look.build);
+  const bk = `${look.sex}|${look.build}`;
   const female = look.sex === 'f';
   const skin = LOOK_SKIN[look.skin];
   const hair = LOOK_HAIR[look.hair];
@@ -854,7 +1121,7 @@ function buildParts(look, tunicHex) {
   const P = {};
 
   // Becken mit Rock der Tunika und Gürtel
-  P.pelvis = cached(`pelvis|${look.sex}|${tunic}`, () => merge([
+  P.pelvis = cached(`pelvis|${bk}|${tunic}`, () => merge([
     { geo: lathe([[0.06, -0.13], [0.13, -0.10], [B.pelvisR, -0.03], [B.pelvisR * 0.98, 0.04], [0.15, 0.10]], 1.08, 0.74), color: CLOTH.trousers },
     { geo: lathe([[B.pelvisR * 1.36 + (female ? 0.05 : 0), B.hem], [B.pelvisR * 1.25, B.hem + 0.06],
                   [B.pelvisR * 1.12, -0.04], [0.16, 0.05], [0.155, 0.11]], 1.1, 0.8, 26),
@@ -869,8 +1136,8 @@ function buildParts(look, tunicHex) {
   // Rumpf mit Tunika, Rucksack mit Deckenrolle und Riemen
   const torsoTop = B.torso[B.torso.length - 1][0];
   const strapY = female ? 0.43 : 0.465;
-  P.torso = cached(`torso|${look.sex}|${skin}|${tunic}`, () => merge([
-    { geo: torsoColored(look.sex, tunic, skin) },
+  P.torso = cached(`torso|${bk}|${skin}|${tunic}`, () => merge([
+    { geo: torsoColored(look.sex, look.build, tunic, skin) },
     { geo: roundBox(0.15, 0.17, 0.065, 3.5), m: at(0, 0.27, -0.165), color: CLOTH.leather },
     { geo: roundBox(0.12, 0.06, 0.012, 3.5), m: at(0, 0.36, -0.096), color: CLOTH.leatherDark },
     { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.36, 14).rotateZ(Math.PI / 2), m: at(0, 0.47, -0.17), color: (x) => (Math.abs(Math.abs(x) - 0.12) < 0.012 ? CLOTH.leatherDark : 0x6d6250) },
@@ -881,7 +1148,7 @@ function buildParts(look, tunicHex) {
   P.torsoTop = torsoTop;
 
   // Hals mit Kehlkopf (Mann) und Nackenmuskeln
-  P.neck = cached(`neck|${look.sex}|${skin}`, () => merge([{ geo: limbShape(0.14, [[0, B.neckR], [0.6, B.neckR * 1.04], [1, B.neckR * 1.2]], 1.05, 1, 14,
+  P.neck = cached(`neck|${bk}|${skin}`, () => merge([{ geo: limbShape(0.14, [[0, B.neckR], [0.6, B.neckR * 1.04], [1, B.neckR * 1.2]], 1.05, 1, 14,
     (x, y, z, t) => [x, y, z + (female ? 0 : 0.008 * gauss(t - 0.45, 0.12) * gauss(x, 0.012) * (z > 0 ? 1 : 0))]),
     m: at(0, 0.14, 0), color: skin }]));
 
@@ -889,28 +1156,28 @@ function buildParts(look, tunicHex) {
   const HD = buildHead(look, skin, hair);
   P.head = HD.head;
   P.tail = HD.tail;
-  const E = cached(`eyes|${look.sex}|${look.skin}`, () => buildEyes(HD.H.s, HD.ez, HD.er, skin, female));
-  P.eyes = E.eyes;
+  const E = cached(`eyes|${look.sex}|${look.face}|${look.skin}|${look.hair}`, () => buildEyes(look, HD.H.s, HD.er, skin));
+  P.eye = E.eye;
   P.lids = E.lids;
   P.headInfo = { s: HD.H.s, ez: HD.ez, Ht: HD.H.Ht, Db: HD.H.Db };
 
   // Arme: Ärmel der Tunika, Haut, Armschiene aus Leder, Faust
   const sleeve = female ? -0.10 : -0.13;
-  P.upper = cached(`upper|${look.sex}|${skin}|${tunic}`, () => merge([
+  P.upper = cached(`upper|${bk}|${skin}|${tunic}`, () => merge([
     { geo: limbShape(B.upper, withCuts(B.upperK, [-sleeve / B.upper]), 1, 1, 14, (x, y, z, t) => [x * (1 + 0.04 * gauss(t - 0.15, 0.12)), y, z * (1 + (z > 0 ? 0.12 : 0.05) * gauss(t - 0.55, 0.2))]),
       color: (x, y) => (y > sleeve ? tunic : skin) },
     { geo: new THREE.TorusGeometry(B.upperK[2][1] * 1.06, 0.007, 4, 14).rotateX(Math.PI / 2), m: at(0, sleeve, 0), color: tunicDark },
   ]));
-  P.fore = cached(`fore|${look.sex}|${skin}`, () => merge([{ geo: limbShape(B.fore, withCuts(B.foreK, [0.09 / B.fore, 1 - 0.02 / B.fore, 0.13 / B.fore, 1 - 0.035 / B.fore]), 1.12, 1, 14, (x, y, z, t) => [x, y, z * (1 + 0.1 * gauss(t - 0.2, 0.15)) * (1 - 0.15 * sstep(0.6, 1, t))]),
+  P.fore = cached(`fore|${bk}|${skin}`, () => merge([{ geo: limbShape(B.fore, withCuts(B.foreK, [0.09 / B.fore, 1 - 0.02 / B.fore, 0.13 / B.fore, 1 - 0.035 / B.fore]), 1.12, 1, 14, (x, y, z, t) => [x, y, z * (1 + 0.1 * gauss(t - 0.2, 0.15)) * (1 - 0.15 * sstep(0.6, 1, t))]),
     color: (x, y) => (y < -0.09 && y > -B.fore + 0.02 ? (Math.abs(y + 0.13) < 0.006 || Math.abs(y + B.fore - 0.035) < 0.006 ? CLOTH.leatherDark : CLOTH.leather) : skin) }]));
-  P.hand = cached(`hand|${look.sex}|${skin}`, () => merge(fistParts(skin, B.hand)));
+  P.hand = cached(`hand|${bk}|${skin}`, () => merge(fistParts(skin, B.hand)));
 
   // Beine: Hose, Stiefel mit Stulpe, Fuß mit Sohle und Absatz
-  P.thigh = cached(`thigh|${look.sex}`, () => merge([{ geo: limbShape(B.thigh, B.thighK, 1, 1, 14,
+  P.thigh = cached(`thigh|${bk}`, () => merge([{ geo: limbShape(B.thigh, B.thighK, 1, 1, 14,
     (x, y, z, t) => [x * (1 + 0.04 * gauss(t - 0.3, 0.2)), y, z * (1 + (z > 0 ? 0.12 : 0.06) * gauss(t - 0.4, 0.25))]),
     color: (x, y) => shade(CLOTH.trousers, 1 - 0.07 * (0.5 + 0.5 * Math.sin(y * 70 + x * 20))) }]));
   const boot = -B.shin * 0.45;
-  P.shin = cached(`shin|${look.sex}`, () => merge([
+  P.shin = cached(`shin|${bk}`, () => merge([
     { geo: limbShape(B.shin, withCuts(B.shinK, [0.45]), 1, 1, 14, (x, y, z, t) => [x * (1 + 0.1 * gauss(t - 0.28, 0.15)), y, z < 0 ? z * (1 + 0.3 * gauss(t - 0.28, 0.16)) : z]),
       color: (x, y) => (y < boot ? CLOTH.leather : CLOTH.trousers) },
     { geo: new THREE.TorusGeometry(B.shinK[2][1] * 1.16, 0.013, 5, 14).rotateX(Math.PI / 2), m: at(0, boot, 0), color: CLOTH.leatherDark,
@@ -923,6 +1190,20 @@ function buildParts(look, tunicHex) {
     { geo: roundBox(0.05 * fk, 0.008, 0.122 * fk, 4), m: at(0, -0.058, 0.045), color: CLOTH.leatherDark },
     { geo: roundBox(0.04 * fk, 0.012, 0.03, 4), m: at(0, -0.062, -0.045), color: CLOTH.leatherDark },
   ]));
+
+  // Köcher an der rechten Hüfte – nur sichtbar, wenn ein Bogen getragen wird
+  P.quiver = cached('quiver', () => {
+    const q = [
+      { geo: limbShape(0.36, [[0, 0.036], [0.85, 0.032], [1, 0.03]], 1, 0.8, 12), m: at(0, 0.18, 0), color: (x, y) => (Math.abs(y - 0.12) < 0.012 || Math.abs(y + 0.1) < 0.012 ? CLOTH.leatherDark : CLOTH.leather) },
+      { geo: new THREE.TorusGeometry(0.035, 0.007, 5, 14).rotateX(Math.PI / 2), m: at(0, 0.175, 0), color: CLOTH.leatherDark },
+    ];
+    for (let i = 0; i < 5; i++) {
+      const ax = Math.cos(i * 1.3) * 0.014, az = Math.sin(i * 1.3) * 0.01, h = 0.23 + (i % 3) * 0.018;
+      q.push({ geo: new THREE.CylinderGeometry(0.003, 0.003, 0.12, 4), m: at(ax, h - 0.05, az), color: 0x8a6239 });
+      q.push({ geo: new THREE.BoxGeometry(0.022, 0.05, 0.002), m: at(ax, h, az, 0, i * 0.7, 0), color: i % 2 ? 0xe8e0d0 : 0x9e3a2e });
+    }
+    return merge(q);
+  });
 
   CHAR_GEO_CACHE.set(key, P);
   return P;
@@ -1024,7 +1305,7 @@ function setStringTo(bow, nock) {
 // ---------------------------------------------------------------------------
 function makeCharacter(color, name, rawLook) {
   const look = normLook(rawLook);
-  const B = BODY[look.sex];
+  const B = bodyDims(look.sex, look.build);
   const P = buildParts(look, color);
 
   const root = new THREE.Group();
@@ -1051,8 +1332,13 @@ function makeCharacter(color, name, rawLook) {
   const HI = P.headInfo;
   const head = joint(neck, 0, B.head, 0.008, null);                        // Drehpunkt auf dem Hals
   const face = joint(head, 0, 0.066 * HI.s, 0.022 * HI.s, P.head);         // Kopfmitte = Augenhöhe
-  const eyes = new THREE.Mesh(P.eyes, EYE_MAT);
-  face.add(eyes);
+  face.scale.setScalar(HEAD_SCALE);
+  const eyes = [-1, 1].map((sx) => {                                       // jedes Auge bewegt sich selbst
+    const e = new THREE.Mesh(P.eye, EYE_MAT);
+    e.position.set(sx * EYE.x * HI.s, EYE.y * HI.s, HI.ez);
+    face.add(e);
+    return e;
+  });
   const lids = new THREE.Mesh(P.lids, CHAR_MAT);                           // Oberlider drehen um die Augenachse
   lids.position.set(0, EYE.y * HI.s, HI.ez);
   lids.rotation.x = LID_OPEN;
@@ -1077,6 +1363,10 @@ function makeCharacter(color, name, rawLook) {
     return { th, kn, an };
   };
   const RL = leg(-1), LL = leg(1);
+  const quiver = new THREE.Mesh(P.quiver, CHAR_MAT);
+  quiver.position.set(-0.17 * (B.pelvisR / 0.158), -0.06, -0.075);
+  quiver.rotation.set(-0.42, 0, -0.18);
+  hips.add(quiver);
 
   // Waffen: Schwert und Dolch in der rechten Hand, Bogen in der linken
   const gear = {};
@@ -1084,14 +1374,15 @@ function makeCharacter(color, name, rawLook) {
   for (const k of ['bow', 'longbow']) { gear[k] = makeWeapon(k); L.ha.add(gear[k]); }
 
   const tag = makeNameTag(name);
-  tag.position.y = B.hip + B.waist + B.chest + B.neck - 0.02 + B.head + 0.066 * HI.s + HI.Ht + 0.3;
+  tag.position.y = B.hip + B.waist + B.chest + B.neck - 0.02 + B.head + 0.066 * HI.s + HI.Ht * HEAD_SCALE + 0.3;
   root.add(tag);
 
   root.userData = {
-    look, tag, gear, shadow,
+    look, tag, gear, shadow, quiver,
     j: { pose, hips, spine, chest, neck, head, face, eyes, lids, tail, R, L, RL, LL },
     w: 'heavy', walk: 0, amp: 0, run: 0, swing: -1, cast: -1, hurt: -1, ko: false, koT: 0,
     t: Math.random() * 100, blinkAt: 1 + Math.random() * 3, blink: -1,
+    gaze: { x: 0, y: 0, tx: 0, ty: 0, next: 0 }, lastRy: null,
   };
   setWeaponModel(root, 'heavy');
   scene.add(root);
@@ -1103,6 +1394,7 @@ function setWeaponModel(model, w) {
   if (!u.gear[w]) return;
   u.w = w;
   for (const k in u.gear) u.gear[k].visible = k === w;
+  if (u.quiver) u.quiver.visible = isBow(w);
 }
 
 function disposeCharacter(root) {
@@ -1115,7 +1407,7 @@ function disposeCharacter(root) {
 // ---------------------------------------------------------------------------
 //  Animation
 // ---------------------------------------------------------------------------
-const LID_OPEN = -0.22, LID_SHUT = 0.55;
+const LID_OPEN = -0.36, LID_SHUT = 0.5;      // offen: Lid deckt die Iris oben knapp ab
 const isBow = (w) => w === 'bow' || w === 'longbow';
 const isDagger = (w) => w === 'dagger' || w === 'iron_dagger';
 const SWING_TIME = (w) => (isDagger(w) ? 0.32 : isBow(w) ? 0.55 : 0.45);
@@ -1182,16 +1474,25 @@ function animateCharacter(model, x, z, ry, speed, dt) {
   };
   leg(J.LL, ph, 1);
   leg(J.RL, ph + Math.PI, -1);
+  // Spielbein locker: Knie leicht gebeugt, Beine bleiben senkrecht trotz gekipptem Becken
+  const relax = idle * (1 - down);
+  J.RL.kn.rotation.x += 0.17 * relax;
+  J.RL.th.rotation.x -= 0.07 * relax;
+  J.RL.an.rotation.x -= 0.06 * relax;
+  J.LL.th.rotation.z -= 0.045 * relax;
+  J.RL.th.rotation.z -= 0.06 * relax;
 
   const bob = A * ((0.025 + 0.035 * Rn) * Math.cos(2 * ph) - 0.035 * Rn);
   J.pose.position.y = bob + 0.004 * breath * idle + down * 0.12;
   J.pose.rotation.x = -Math.PI / 2 * down;
-  J.hips.position.x = 0.012 * Math.sin(t * 0.45) * idle;
-  J.hips.rotation.z = 0.025 * Math.sin(t * 0.45) * idle + A * 0.04 * cL;
+  // Im Stand: Gewicht auf dem linken Bein (Kontrapost) – Becken links höher, Schultern gegengleich
+  J.hips.position.x = (0.016 + 0.01 * Math.sin(t * 0.45)) * idle;
+  J.hips.rotation.z = (0.045 + 0.02 * Math.sin(t * 0.45)) * idle + A * 0.04 * cL;
   J.hips.rotation.y = A * (0.12 + 0.06 * Rn) * sL;
   J.spine.rotation.x = A * (0.05 + 0.17 * Rn) + 0.015 * breath * idle;
   J.spine.rotation.y = -A * (0.1 + 0.06 * Rn) * sL;
   J.spine.rotation.z = -J.hips.rotation.z * 0.6;
+  J.chest.rotation.z = -0.03 * idle;
   J.chest.rotation.x = 0.012 * breath;
   J.chest.rotation.y = -A * 0.12 * sL;
   J.neck.rotation.x = -J.spine.rotation.x * 0.55;
@@ -1315,15 +1616,32 @@ function animateCharacter(model, x, z, ry, speed, dt) {
     J.pose.position.y -= 0.03 * hk;
   }
 
-  // ---- Blinzeln ----
+  // ---- Blinzeln: unregelmäßig alle 2–7 s, und bei einer schnellen Drehung ----
   u.blinkAt -= dt;
-  if (u.blinkAt <= 0) { u.blink = 0; u.blinkAt = 2.2 + Math.random() * 3.5; }
+  if (u.lastRy !== null && Math.abs(Math.atan2(Math.sin(ry - u.lastRy), Math.cos(ry - u.lastRy))) > 0.6 && u.blink < 0) u.blinkAt = 0;
+  u.lastRy = ry;
+  if (u.blinkAt <= 0) { u.blink = 0; u.blinkAt = 2 + Math.random() * 5; }
   if (u.blink >= 0) {
     u.blink += dt / 0.14;
     if (u.blink >= 1) u.blink = -1;
   }
   const shut = u.ko ? 1 : (u.blink >= 0 ? 1 - Math.abs(u.blink * 2 - 1) : 0);
   J.lids.rotation.x = LID_OPEN + (LID_SHUT - LID_OPEN) * shut;
+
+  // ---- Blick: kleine, schnelle Sprünge, dazwischen ruhig ----
+  const g = u.gaze;
+  if (t >= g.next) {
+    const amp = Math.min(0.3, -Math.log(1 - Math.random() * 0.95) * 0.1);
+    const a = Math.random() * Math.PI * 2;
+    g.tx = Math.cos(a) * amp + J.head.rotation.y * 0.6;
+    g.ty = Math.sin(a) * amp * 0.55;
+    if (Math.random() < 0.4) { g.tx *= 0.3; g.ty *= 0.3; }           // oft zurück geradeaus
+    g.next = t + 0.5 + Math.random() * 2.5;
+  }
+  const gk = damp(38, dt);
+  g.x = lerp(g.x, u.ko ? 0 : g.tx, gk);
+  g.y = lerp(g.y, u.ko ? 0 : g.ty, gk);
+  for (const e of J.eyes) { e.rotation.y = g.x; e.rotation.x = -g.y; }
 
   // ---- Zopf schwingt mit ----
   if (J.tail) {
@@ -1355,8 +1673,8 @@ function animateCharacter(model, x, z, ry, speed, dt) {
 }
 
 // Kopfformen beider Geschlechter schon vorbereiten, solange das Anmeldefenster offen ist
-setTimeout(() => {
-  try {
-    for (const sex of ['m', 'f']) buildParts(normLook({ sex }), 0x777777);
-  } catch (err) { /* nur Vorarbeit */ }
-}, 400);
+for (const [sex, ms] of [['m', 400], ['f', 900]]) {
+  setTimeout(() => {
+    try { buildParts(normLook({ sex }), 0x777777); } catch (err) { /* nur Vorarbeit */ }
+  }, ms);
+}

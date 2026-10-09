@@ -940,10 +940,16 @@ function get(port, urlPath) {
     ok('Aussehen ändern: geprüft und an alle weitergegeben',
       lk.look.sex === 'm' && lk.look.skin === 1 && lk.look.hair === 2 && lk.look.style === 1 && lk.look.beard === 1, JSON.stringify(lk.look));
     ok('Aussehen wird mit dem Charakter gespeichert', S.snapshot(lina.p).look.sex === 'm' && S.snapshot(lina.p).look.beard === 1);
+    ok('Gesicht und Statur haben Vorgaben', lk.look.face === 0 && lk.look.build === 1);
+    ok('Neue Frisuren, Bärte, Gesichter und Staturen werden angenommen, Unsinn abgewiesen',
+      S.normLook({ sex: 'm', style: 4, beard: 3, face: 3, build: 2 }).style === 4 && S.normLook({ sex: 'm', beard: 3 }).beard === 3
+      && S.normLook({ sex: 'f', face: 2, build: 0 }).face === 2 && S.normLook({ sex: 'f', build: 0 }).build === 0
+      && S.normLook({ sex: 'm', style: 5, face: 4, build: 3, beard: 4 }).style === 0 && S.normLook({ face: 4 }).face === 0
+      && S.normLook({ build: 3 }).build === 1 && S.normLook({ beard: 4 }).beard === 0);
     lina.send({ t: 'look', look: { sex: 'f' } });            // gleich danach: gedrosselt
     await sleep(120);
     ok('Zu schnelle Änderungen werden ignoriert', lina.p.look.sex === 'm');
-    ok('Unsinniges Aussehen wird zum Standard', JSON.stringify(S.normLook('quatsch')) === JSON.stringify({ sex: 'm', skin: 1, hair: 1, style: 0, beard: 0 }));
+    ok('Unsinniges Aussehen wird zum Standard', JSON.stringify(S.normLook('quatsch')) === JSON.stringify({ sex: 'm', skin: 1, hair: 1, style: 0, beard: 0, face: 0, build: 1 }));
     lina.ws.close();
   });
 

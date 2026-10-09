@@ -385,6 +385,12 @@ function makeEl(id, hidden = false) {
   await until(() => ev('me.look && me.look.sex') === 'f');
   ok('Frau gewählt: der Server bestätigt, die Figur wird neu gebaut', ev('me.model.userData.look.sex') === 'f' && P().look.sex === 'f');
   ok('Frisuren für Frauen, kein Bart', el('look-style').children[1].textContent === 'Pferdeschwanz' && el('look-beard-row').hidden === true);
+  ok('Fünf Frisuren, vier Gesichter, drei Staturen', el('look-style').children.length === 5 && el('look-face').children.length === 4
+    && el('look-build').children.length === 3 && el('look-face').children[1].textContent === 'Zart');
+  await pump(300);                  // Aussehen höchstens viermal pro Sekunde
+  el('look-build').children[2].dispatch('click');
+  await until(() => ev('me.look && me.look.build') === 2);
+  ok('Statur „Kräftig“ gewählt: der Server bestätigt', P().look.build === 2 && ev('me.model.userData.look.build') === 2);
   el('look-close').dispatch('click');
   ok('Fertig: Panel zu, Kamera zurück', el('look').hidden === true && ev('camDist') !== 3.4);
   ok('Gebäude blockieren im Client wie im Server', ev('inBuilding(-24, -16)') === true && ev('inBuilding(0, 0)') === false);
