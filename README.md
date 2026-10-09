@@ -22,6 +22,39 @@ Low-Poly-3D mit Three.js, Echtzeit-Mehrspieler über WebSockets, Server in Node.
 - **Dorf:** In der Schmiede entstehen aus Beute neue Waffen (Eisenschwert, Eisendolch,
   Langbogen). Schmieden dauert drei Sekunden; wer sich vorher entfernt, bricht ab und
   behält seine Zutaten. Am Lagerfeuer wird Wildfleisch gegrillt – gegrillt heilt es doppelt.
+- **Festung Grauwacht:** Die Welt ist jetzt viermal so groß (±200 m). Ein Weg führt vom Dorf
+  (Wegweiser „Grauwacht“) nach Norden, vorbei an einem Vorposten mit Zelten, zur Festung:
+  Mauern mit Zinnen, vier Ecktürme, Torhaus, Unterkünfte und ein Bergfried. Besetzt ist sie
+  mit 21 Menschen aus denselben Figuren wie die Spieler, mit Waffen, Helmen und Schilden.
+  Siehe unten.
+
+### Lernen und die Festung
+
+Man lernt weiter durch Tun, aber **wie viel, hängt vom Gegner ab**. Jeder Gegner hat eine
+Stufe: Bis die eigene Attributsumme sie erreicht, lernt man voll, in den nächsten 25 Punkten
+immer weniger, danach nichts mehr (dann kommt ein Hinweis). An Tieren reicht das bis etwa
+Summe 100–130, danach geht es in der Festung weiter – dort lernt man auch schneller.
+
+| Gegner | Waffe | Leben | Schaden | lehrt bis Summe | Lernen |
+| --- | --- | --- | --- | --- | --- |
+| Hase / Wolf / Keiler | – | 20 / 45 / 70 | 0 / 6 / 9 | 70 / 95 / 105 | 1× |
+| Späher | Bogen (Fernkampf) | 460 | 26 | 150 | 1,5× |
+| Wächter | Schwert, Schild, Helm | 750 | 25 | 185 | 1,75× |
+| Söldner | Eisendolch, schnell | 950 | 22 | 220 | 2× |
+| Kampfmagier | Stab, Feuer (Fernkampf) | 720 | 50 | 250 | 2,25× |
+| Veteran | Eisenschwert, Schild, Helm | 1600 | 44 | 285 | 2,5× |
+| Hauptmann | Eisenschwert, Schild, Kammhelm | 4200 | 48 | 340 | 3× |
+
+Rechnerisch dauert es von Summe 100 bis 300 etwa drei Stunden reine Kampfzeit. Das Ziel ist
+Summe 300 (Grundlage der späteren Wiedergeburt); am Hauptmann geht es noch etwas darüber.
+
+Die Besatzung steht auf festen Posten. Wer näher kommt, wird gestellt; Kameraden in der Nähe
+(6 m) helfen mit. Wer sie zu weit vom Posten weglockt, lässt sie umkehren: Auf dem Rückweg sind
+sie nicht angreifbar und stehen danach wieder mit vollem Leben da. Besiegte Posten werden nach
+1–4 Minuten neu besetzt. Spieler, die an einem Gegner nichts mehr lernen, greift er nicht von
+selbst an. Das Namensschild zeigt die Schwierigkeit: **rot** gefährlich, **gelb** passend,
+**grün** leicht, **grau** man lernt nichts mehr. Die Menschen tragen Proviant (heilt 60), manchmal
+lassen sie ihre Waffe fallen.
 
 ### Figuren
 
@@ -86,7 +119,11 @@ Charakternamen, zum Beispiel `Creator`. Gleichgültig ob Groß- oder Kleinschrei
 Den Charakter legt man ganz normal im Spiel an. Wird der Name aus der Liste entfernt,
 verliert er die Rechte beim nächsten Anmelden.
 
-Jede Verwaltungs-Aktion (Gegenstand geben, sperren, sichtbar/unsichtbar) steht im
+Zum Testen gibt es dort außerdem **Reisen** (Start, Vorposten, Festung) und **Summe setzen**:
+Die eigenen Attribute werden auf die gewählte Summe gebracht, ihr Verhältnis bleibt gleich.
+Beides wirkt nur auf die eigene Figur.
+
+Jede Verwaltungs-Aktion (Gegenstand geben, sperren, sichtbar/unsichtbar, reisen, Summe) steht im
 Protokoll. Es liegt in der Datenbank (Tabelle `d40_admin_log`) und bleibt über Neustarts
 erhalten; die Verwaltung zeigt die letzten 50 Einträge.
 
