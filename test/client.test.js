@@ -137,6 +137,8 @@ function makeEl(id, hidden = false) {
     return fn();
   }
   const logged = (text) => ev('__logs').includes(text);
+  // Tiere still entfernen; die Besatzung der Festung bleibt (der Client kennt sie schon)
+  const clearAnimals = () => { for (const [id, e] of S.enemies) if (!S.ENEMY_KINDS[e.kind].human) S.enemies.delete(id); };
   const loginOpen = () => el('login').hidden === false && ev("document.body.classList.contains('login-open')");
   const submit = (kind, name, pass) => {
     el('login-name').value = name;
@@ -244,7 +246,7 @@ function makeEl(id, hidden = false) {
   ok('K.O. wird angezeigt', ev('me.ko') === true && el('ko').hidden === false && logged('Du bist bewusstlos.'));
   await until(() => ev('me.ko') === false, 4000);
   ok('Wieder auf den Beinen', ev('me.ko') === false && el('ko').hidden === true);
-  S.enemies.clear();
+  clearAnimals();
   P().autoTarget = null;
 
   // ---- Schritt 4: Beute, Tasche, Last, Truhe ----
@@ -257,7 +259,7 @@ function makeEl(id, hidden = false) {
     return null;
   };
   teleport(15, 15);
-  S.enemies.clear();
+  clearAnimals();
   for (const id of [...S.loots.keys()]) S.removeLoot(id, 0);   // Beute aus den Kämpfen weiter oben
   await pump(200);
   ok('Last-Anzeige unter Leben und Mana', el('load-text').textContent === '0,0 / 40' && el('load-bar').style.width === '0%');
@@ -394,6 +396,35 @@ function makeEl(id, hidden = false) {
   el('look-close').dispatch('click');
   ok('Fertig: Panel zu, Kamera zurück', el('look').hidden === true && ev('camDist') !== 3.4);
   ok('Gebäude blockieren im Client wie im Server', ev('inBuilding(-24, -16)') === true && ev('inBuilding(0, 0)') === false);
+  ok('Client und Server kennen dieselben Gebäude, auch die Festung', JSON.stringify(ev('BUILDINGS')) === JSON.stringify(S.BUILDINGS));
+  ok('Client und Server rechnen dieselbe Landschaft, samt eingeebneter Festung',
+    [[0, 0], [25, -150], [40, -120], [-80, 60], [10, -98], [60, -170]].every(([x, z]) => Math.abs(ev(`heightAt(${x}, ${z})`) - S.heightAt(x, z)) < 1e-9));
+
+  // ---- Festung: Besatzung erscheint erst in der Nähe als Figur, mit Farbe nach Schwierigkeit ----
+  const humanCount = () => ev('[...creatures.values()].filter((c) => c.model.userData.human).length');
+  const builtFoes = () => ev('[...creatures.values()].filter((c) => c.model.userData.fig).length');
+  const built0 = builtFoes();
+  ok('Besatzung der Festung ist bekannt, aus der Ferne aber noch nicht gebaut', humanCount() === S.POSTS.length && built0 < 3,
+    `${humanCount()} Menschen, ${built0} gebaut`);
+  const campAt = { x: S.CAMP.x + 14, z: S.CAMP.z + 16 };
+  P().x = campAt.x; P().z = campAt.z; P().safeUntil = Date.now() + 60000;
+  ev(`me.x = ${campAt.x}; me.z = ${campAt.z};`);
+  await until(() => builtFoes() >= built0 + 5, 4000);
+  ok('In der Nähe entstehen die Figuren, eine nach der anderen', builtFoes() >= built0 + 5 && builtFoes() < humanCount());
+  const guardTone = ev("(() => { const c = [...creatures.values()].find((c) => c.kind === 'guard' && c.model.userData.fig); return c && c.model.userData.tone; })()");
+  ok('Namensschild zeigt die Schwierigkeit (Anfänger: Wächter sind gefährlich)', guardTone === 'red', guardTone);
+  ok('Einstufung: grau, wenn man nichts mehr lernt', ev("foeTone('guard', 300)") === 'grey' && ev("foeTone('guard', 170)") === 'green'
+    && ev("foeTone('guard', 120)") === 'yellow');
+  P().safeUntil = 0;
+  P().hp = P().hpMax = 5000;
+  P().x = S.CAMP.x + 4; P().z = S.CAMP.z + 10;       // in Schussweite der Späher
+  ev(`me.x = ${S.CAMP.x + 4}; me.z = ${S.CAMP.z + 10};`);
+  ok('Späher schießen sichtbar mit Pfeilen', await until(() => ev('shots.some((s) => s.target === me.model)'), 5000));
+  P().x = 0; P().z = 3; P().safeUntil = Date.now() + 10000;
+  P().hpMax = S.maxHp(P().a); P().hp = P().hpMax;
+  P().autoTarget = null;
+  ev('me.x = 0; me.z = 3;');
+  await pump(600);
 
   // ---- Abmelden ----
   const before = { ...P().a };

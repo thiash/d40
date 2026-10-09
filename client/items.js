@@ -390,7 +390,11 @@ function onItemNotes(msg) {
     log(`Fertig! Du hast ${listItems(msg.crafted)} geschmiedet.`);
   }
   if (msg.cooked) log(`Du grillst ${listItems(msg.cooked)}.`);
-  if (msg.ate) log(msg.ate === 'grilled_meat' ? 'Du isst das gegrillte Fleisch.' : 'Du isst das rohe Fleisch. Besser wäre es gegrillt.');
+  if (msg.ate) {
+    log(msg.ate === 'grilled_meat' ? 'Du isst das gegrillte Fleisch.'
+      : msg.ate === 'ration' ? 'Du isst etwas von dem Proviant.'
+      : 'Du isst das rohe Fleisch. Besser wäre es gegrillt.');
+  }
   const spd = msg.self.spd ?? 1;
   if (spd !== itemState.spd) {
     if (spd === 0) log('Du trägst zu viel und kommst nicht mehr vom Fleck. Leg etwas ab.');

@@ -168,7 +168,8 @@
   #admin .field { display: block; margin: 8px 0; font-size: 14px; color: var(--bone-dim); }
   #admin input, #admin select { display: block; width: 100%; margin-top: 4px; padding: 8px; border-radius: 8px; box-sizing: border-box;
     background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(236, 227, 204, 0.25); color: var(--bone); font: 15px var(--sans); }
-  #admin .admin-give { display: grid; grid-template-columns: 1fr 88px; gap: 8px; }
+  #admin .admin-give { display: grid; grid-template-columns: 1fr 88px; gap: 8px; align-items: center; }
+  #admin .admin-travel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   #admin .wide { display: block; width: 100%; margin: 6px 0; padding: 9px 0; border-radius: 9px; cursor: pointer;
     background: transparent; border: 1px solid rgba(236, 227, 204, 0.3); color: var(--bone); font: 500 15px/1.2 var(--sans); }
   #admin .wide:focus-visible, #admin input:focus-visible, #admin select:focus-visible { outline: 3px solid var(--bone); outline-offset: 2px; }
@@ -461,6 +462,19 @@
     <h3>Spieler</h3>
     <button id="admin-ban" class="wide" type="button">Sperren</button>
     <button id="admin-vis" class="wide" type="button">Unsichtbar machen</button>
+    <h3>Testen (nur deine eigene Figur)</h3>
+    <div class="admin-travel">
+      <button id="admin-go-start" class="wide" type="button">Zum Start</button>
+      <button id="admin-go-camp" class="wide" type="button">Vorposten</button>
+      <button id="admin-go-fort" class="wide" type="button">Festung</button>
+    </div>
+    <div class="admin-give">
+      <select id="admin-sum" aria-label="Attributsumme">
+        <option value="50">Summe 50</option><option value="100">Summe 100</option><option value="150">Summe 150</option>
+        <option value="200">Summe 200</option><option value="250">Summe 250</option><option value="300">Summe 300</option>
+      </select>
+      <button id="admin-sum-set" class="wide" type="button">Setzen</button>
+    </div>
     <p id="admin-note" class="empty"></p>
     <button id="admin-close" class="wide" type="button">Schließen</button>
   </section>

@@ -245,8 +245,9 @@ function get(port, urlPath) {
     a.p.a.agi = 70;
     a.p.hp = a.p.hpMax = 5000;
     a.p.lastInputAt = Date.now();
-    const old = S.ENEMY_KINDS.wolf.atkMs;
+    const old = S.ENEMY_KINDS.wolf.atkMs, oldTeach = S.ENEMY_KINDS.wolf.teach;
     S.ENEMY_KINDS.wolf.atkMs = 60;
+    S.ENEMY_KINDS.wolf.teach = 1000;        // hohe Beweglichkeit: sonst lernt man am Wolf kaum noch
     const sta0 = a.p.a.sta;
     const wolf = placeInFront(a, 'wolf', 1.2);
     wolf.hp = 100000;
@@ -254,6 +255,7 @@ function get(port, urlPath) {
     await sleep(2500);
     S.enemies.delete(wolf.id);
     S.ENEMY_KINDS.wolf.atkMs = old;
+    S.ENEMY_KINDS.wolf.teach = oldTeach;
     const hits = a.msgs.slice(from).filter((x) => x.t === 'hitP' && x.id === a.id);
     const dodged = hits.filter((x) => x.dodge).length, taken = hits.length - dodged;
     const rate = dodged / hits.length;
@@ -876,6 +878,124 @@ function get(port, urlPath) {
     ok('Server lässt niemanden durch die Mauer laufen', !!c && a.p.x === -21.5);
   });
 
+  // ---- Festung Grauwacht: Lernstufen, Besatzung, Wachverhalten ----
+  await safely('Festung', async () => {
+    const fa = (sum, k) => S.learnFactor(sum, S.ENEMY_KINDS[k]);
+    ok('Lernen: an Tieren bis zu ihrer Stufe voll, danach weniger, dann nichts',
+      fa(50, 'hare') === 1 && fa(95, 'wolf') === 1 && Math.abs(fa(107.5, 'wolf') - 0.5) < 1e-9 && fa(120, 'wolf') === 0);
+    ok('Lernen: Festungsgegner bringen mehr und reichen bis über Summe 300',
+      fa(100, 'scout') === 1.5 && fa(300, 'captain') === 3 && fa(300, 'veteran') > 0
+      && Math.max(...Object.values(S.ENEMY_KINDS).map((d) => d.teach)) >= S.LEARN.goal);
+    ok('Die Festung steht auf ebenem Boden',
+      [[0, 0], [15, 15], [-20, 10], [18, -19]].every(([dx, dz]) => Math.abs(S.heightAt(S.FORT.x + dx, S.FORT.z + dz) - S.FORT.y) < 1e-9));
+    ok('Mauern sind Hindernisse, das Tor ist offen',
+      S.inBuilding(S.FORT.x - 10, S.FORT.z + S.FORT.half) && S.inBuilding(S.FORT.x, S.FORT.z - S.FORT.half)
+      && S.inBuilding(S.FORT.x - S.FORT.half, S.FORT.z) && !S.inBuilding(S.FORT.x, S.FORT.z + S.FORT.half));
+    ok('Posten liegen an Land und nicht in Mauern', S.POSTS.every((p) => S.onLand(p.x, p.z) && !S.inBuilding(p.x, p.z)));
+    S.maintainPosts();
+    const humans = [...S.enemies.values()].filter((e) => S.ENEMY_KINDS[e.kind].human);
+    ok('Alle Wachposten sind besetzt, jeder mit Aussehen', humans.length === S.POSTS.length && humans.every((e) => e.look && e.post),
+      `${humans.length} von ${S.POSTS.length}`);
+
+    const oldNew = S.LIMITS.maxNew;
+    S.LIMITS.maxNew = 1000;
+    const g = new Client(port);
+    const w = await g.ready();
+    S.LIMITS.maxNew = oldNew;
+    ok('Wer neu dazukommt, sieht die Besatzung mit Aussehen', w.enemies.filter((e) => e.look).length === S.POSTS.length);
+    ok('Regeln beschreiben Gegner und Festung', w.rules.enemies.guard.human === true && w.rules.enemies.guard.teach === S.ENEMY_KINDS.guard.teach
+      && w.rules.enemies.scout.shot === 'arrow' && w.rules.fort.x === S.FORT.x && w.rules.worldHalf === 200);
+
+    // Abseits von allem: Wächter stellt Eindringlinge
+    const SPOT = { x: -170, z: 5 };
+    const gp = g.p;
+    gp.x = SPOT.x; gp.z = SPOT.z; gp.ry = 0; gp.lastInputAt = Date.now();
+    const g1 = S.spawnEnemy('guard', gp.x + 3, gp.z);
+    let hit = await g.waitFor((x) => x.t === 'hitP' && x.by === g1.id, 4000);
+    ok('Wächter greift an, wer seinem Posten zu nahe kommt', g1.target === gp.id && !!hit);
+    gp.x += 60;                                         // weit weg: er gibt auf und geht zurück
+    await sleep(150);
+    ok('Zu weit vom Posten: er kehrt um', g1.returning === true && g1.target === null);
+    await g.waitFor((x) => x.t === 'hitE' && x.id === g1.id && x.heal, 4000);
+    ok('Zurück am Posten: wieder bei voller Kraft', !g1.returning && g1.hp === g1.hpMax && Math.hypot(g1.x - g1.post.x, g1.z - g1.post.z) < 0.6);
+    S.enemies.delete(g1.id);
+
+    // Kameraden helfen: wer einen Wächter angreift, hat bald zwei am Hals
+    gp.x = SPOT.x; gp.z = SPOT.z; gp.ry = 0; gp.hp = gp.hpMax;
+    gp.safeUntil = Date.now() + 60000;                 // niemand greift von selbst an
+    await sleep(950);
+    const h1 = S.spawnEnemy('guard', gp.x, gp.z + 1.5);
+    const h2 = S.spawnEnemy('guard', gp.x + 4, gp.z + 3);
+    const h3 = S.spawnEnemy('guard', gp.x - 14, gp.z + 2);
+    await sleep(100);
+    ok('In Ruhe gelassen, solange man sich erholt', h1.target === null && h2.target === null);
+    const str0 = gp.a.str;
+    let from = g.mark();
+    g.send({ t: 'attack' });
+    await g.waitFor((x) => x.t === 'hitE' && x.id === h1.id, 2000, from);
+    await g.waitFor((x) => x.t === 'you' && x.self.a.str > str0, 2000, from);
+    ok('Angegriffener ruft Hilfe, Entferntere bleiben auf Posten', h1.target === gp.id && h2.target === gp.id && h3.target === null);
+    ok('Lernen am Wächter: 1,75-mal so viel wie an Tieren', Math.abs(gp.a.str - str0 - 0.0175) < 0.0011, `${(gp.a.str - str0).toFixed(4)}`);
+    gp.x += 60;
+    await sleep(900);                                   // Abklingzeit des eigenen Angriffs abwarten
+    from = g.mark();
+    gp.x -= 60;                                         // zurück, während sie heimkehren
+    h1.returning = true;
+    g.send({ t: 'attack' });
+    await sleep(250);
+    ok('Auf dem Rückweg sind sie nicht angreifbar', g.count((x) => x.t === 'hitE' && x.id === h1.id && !x.heal, from) === 0);
+    [h1, h2, h3].forEach((e) => S.enemies.delete(e.id));
+    gp.autoTarget = null;
+
+    // Späher schießt aus der Ferne
+    gp.safeUntil = 0;
+    const sc = S.spawnEnemy('scout', gp.x, gp.z + 10);
+    hit = await g.waitFor((x) => x.t === 'hitP' && x.by === sc.id, 4000);
+    ok('Späher schießt mit Pfeilen aus der Ferne', hit.r === 'arrow' && Math.hypot(sc.x - gp.x, sc.z - gp.z) > 8);
+    S.enemies.delete(sc.id);
+
+    // Wer weit überlegen ist, wird nicht mehr angegriffen – und lernt an Tieren nichts mehr
+    const strong = { str: 60, sta: 60, agi: 60, int: 60, wis: 60 };
+    gp.a = { ...strong };
+    gp.hp = gp.hpMax = S.maxHp(gp.a);
+    const g2 = S.spawnEnemy('guard', gp.x + 3, gp.z);
+    await sleep(500);
+    ok('Überlegene Spieler lässt die Besatzung in Ruhe', g2.target === null);
+    S.enemies.delete(g2.id);
+    gp.ry = 0;
+    await sleep(500);
+    const wolf = S.spawnEnemy('wolf', gp.x, gp.z + 1.5);
+    from = g.mark();
+    g.send({ t: 'attack' });
+    const weak = await g.waitFor((x) => x.t === 'you' && x.weak, 2000, from);
+    ok('An zu schwachen Tieren lernt man nichts mehr, mit Hinweis', weak.weak === 'wolf' && gp.a.str === 60);
+    S.enemies.delete(wolf.id);
+    gp.autoTarget = null;
+
+    // Besiegte Wachen kommen nach einer Weile zurück
+    const post = S.POSTS[0];
+    const e0 = S.enemies.get(post.enemyId);
+    const oldRespawn = S.ENEMY_KINDS[post.kind].respawnMs;
+    S.ENEMY_KINDS[post.kind].respawnMs = 50;
+    gp.x = e0.x; gp.z = e0.z - 1.5; gp.ry = 0; gp.safeUntil = Date.now() + 60000;
+    e0.hp = 1;
+    await sleep(950);
+    from = g.mark();
+    g.send({ t: 'attack' });
+    await g.waitFor((x) => x.t === 'despawn' && x.id === e0.id, 2000, from);
+    ok('Besiegter Posten wird frei', post.enemyId === null && !S.enemies.has(e0.id));
+    gp.x = SPOT.x; gp.z = SPOT.z;
+    await sleep(100);
+    S.maintainPosts();
+    const e1 = S.enemies.get(post.enemyId);
+    ok('Nach der Wartezeit steht dort ein neuer', !!e1 && e1.id !== e0.id && e1.kind === post.kind && e1.x === post.x);
+    S.ENEMY_KINDS[post.kind].respawnMs = oldRespawn;
+    const capDrop = S.rollDrops('captain');
+    ok('Der Hauptmann trägt immer Proviant bei sich', capDrop.ration >= 2);
+    g.ws.close();
+    await sleep(100);
+  });
+
   await safely('Administrator-Figur', async () => {
     const oldEnv = process.env.ADMIN_NAMES;
     process.env.ADMIN_NAMES = ' Creator , Mira';
@@ -920,6 +1040,24 @@ function get(port, urlPath) {
       && lg.entries.some((e) => /gibt/.test(e.text)) && lg.entries[0].by === a.p.name);
     const stored = await S.getStore().listAdminLog(50);
     ok('Protokoll wird im Speicher abgelegt (mit Datenbank: dauerhaft)', stored.length >= 4 && /sperrt Testopfer/.test(stored[0].text));
+    const keepA = { ...a.p.a }, keepX = a.p.x, keepZ = a.p.z;
+    from = a.mark();
+    a.send({ t: 'admin', op: 'travel', to: 'fort' });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'travel', 2000, from);
+    const moved = await a.waitFor((x) => x.t === 'correct', 2000, from);
+    ok('Reisen zum Testen: vor das Tor der Festung', r.ok === true && moved.z === a.p.z && Math.abs(a.p.x - S.FORT.x) < 1 && a.p.z > S.FORT.z + S.FORT.half);
+    from = a.mark();
+    a.send({ t: 'admin', op: 'travel', to: '__proto__' });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'travel', 2000, from);
+    ok('Unbekannte Reiseziele werden abgelehnt', r.ok === false);
+    from = a.mark();
+    a.send({ t: 'admin', op: 'attrs', sum: 200 });
+    r = await a.waitFor((x) => x.t === 'admin' && x.op === 'attrs', 2000, from);
+    ok('Eigene Attributsumme setzen: Verhältnis bleibt, Leben voll',
+      r.ok === true && Math.abs(S.attrSum(a.p.a) - 200) < 0.01 && a.p.hp === a.p.hpMax && a.p.hpMax === S.maxHp(a.p.a)
+      && Math.abs(a.p.a.str / a.p.a.int - keepA.str / keepA.int) < 0.01);
+    a.p.a = keepA; a.p.hpMax = S.maxHp(keepA); a.p.hp = a.p.hpMax; a.p.manaMax = S.maxMana(keepA); a.p.mana = a.p.manaMax;
+    a.p.x = keepX; a.p.z = keepZ;
     a.p.admin = false;
     from = a.mark();
     a.send({ t: 'admin', op: 'give', name: a.p.name, k: 'meat', n: 1 });

@@ -65,6 +65,7 @@ const WEAPON_MATS = {
   darkwood: new THREE.MeshPhongMaterial({ color: 0x4a3420, shininess: 20 }),
   string:   new THREE.MeshBasicMaterial({ color: 0xe8dcc0 }),
   feather:  new THREE.MeshLambertMaterial({ color: 0xd8d0c0 }),
+  orb:      new THREE.MeshPhongMaterial({ color: 0xc78aff, emissive: 0x6a2fb0, shininess: 90 }),
 };
 const SHADOW_MAT = new THREE.MeshBasicMaterial({
   color: 0x000000, transparent: true, opacity: 0.26, depthWrite: false,
@@ -1237,6 +1238,10 @@ const WEAPON_GEO = (() => {
     arrow: new THREE.CylinderGeometry(0.005, 0.005, 0.7, 5).translate(0, 0.35, 0),
     arrowHead: new THREE.ConeGeometry(0.012, 0.04, 4).translate(0, 0.72, 0),
     fletch: new THREE.BoxGeometry(0.03, 0.08, 0.002).translate(0, 0.06, 0),
+    // Stab der Kampfmagier: steht senkrecht in der Faust, oben ein glimmender Stein
+    staff: new THREE.CylinderGeometry(0.016, 0.022, 1.62, 7).translate(0, 0.06, 0),
+    staffHead: new THREE.TorusGeometry(0.045, 0.012, 5, 10),
+    orb: new THREE.IcosahedronGeometry(0.045, 1),
   };
 })();
 
@@ -1258,6 +1263,11 @@ function makeWeapon(kind) {
     add(G.bladeTip, steel, 0, 0, 0.85 + 0.035);
     g.position.y = -0.06;
     g.rotation.x = 0.25;
+  } else if (kind === 'staff') {
+    add(G.staff, W.darkwood);
+    add(G.staffHead, W.brass, 0, 0.92, 0);
+    add(G.orb, W.orb, 0, 0.92, 0);
+    g.position.y = -0.055;
   } else if (kind === 'dagger' || kind === 'iron_dagger') {
     const steel = kind === 'dagger' ? W.steel : W.iron;
     add(G.knifeGrip, W.grip, 0, 0, 0);
@@ -1370,7 +1380,7 @@ function makeCharacter(color, name, rawLook) {
 
   // Waffen: Schwert und Dolch in der rechten Hand, Bogen in der linken
   const gear = {};
-  for (const k of ['heavy', 'dagger', 'iron_sword', 'iron_dagger']) { gear[k] = makeWeapon(k); R.ha.add(gear[k]); }
+  for (const k of ['heavy', 'dagger', 'iron_sword', 'iron_dagger', 'staff']) { gear[k] = makeWeapon(k); R.ha.add(gear[k]); }
   for (const k of ['bow', 'longbow']) { gear[k] = makeWeapon(k); L.ha.add(gear[k]); }
 
   const tag = makeNameTag(name);
@@ -1395,6 +1405,68 @@ function setWeaponModel(model, w) {
   u.w = w;
   for (const k in u.gear) u.gear[k].visible = k === w;
   if (u.quiver) u.quiver.visible = isBow(w);
+}
+
+// ---------------------------------------------------------------------------
+//  Rüstung der Festungsbesatzung: Helm (1 Nasalhelm, 2 mit Wangenklappen und
+//  Nackenschutz, 3 dazu ein roter Kamm für den Hauptmann) und Rundschild am linken Arm
+// ---------------------------------------------------------------------------
+const ARMOR_MATS = {
+  iron:  new THREE.MeshPhongMaterial({ color: 0x6b737b, shininess: 55, specular: 0x6a7078, flatShading: true }),
+  steel: new THREE.MeshPhongMaterial({ color: 0xa9b1b8, shininess: 70, specular: 0x8a9096, flatShading: true }),
+  plume: new THREE.MeshLambertMaterial({ color: 0x9e2a26 }),
+  wood:  new THREE.MeshLambertMaterial({ color: 0x7a5a38 }),
+};
+const ARMOR_GEO = {
+  dome:  new THREE.SphereGeometry(1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2),
+  rim:   new THREE.TorusGeometry(1, 0.09, 4, 18).rotateX(Math.PI / 2),
+  nasal: new THREE.BoxGeometry(0.014, 0.075, 0.01),
+  cheek: new THREE.BoxGeometry(0.008, 0.085, 0.06),
+  neck:  new THREE.CylinderGeometry(1, 1.06, 1, 12, 1, true, Math.PI * 0.55, Math.PI * 0.9),
+  crest: new THREE.SphereGeometry(1, 10, 6),
+  board: new THREE.CylinderGeometry(0.27, 0.27, 0.025, 18).rotateZ(Math.PI / 2),
+  edge:  new THREE.TorusGeometry(0.27, 0.014, 4, 22).rotateY(Math.PI / 2),
+  boss:  new THREE.SphereGeometry(0.06, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2).rotateZ(-Math.PI / 2),
+};
+const SHIELD_MAT_CACHE = new Map();
+function dressFoe(model, gear) {
+  if (!gear) return;
+  const u = model.userData, J = u.j, s = model.userData.look.sex === 'f' ? 0.95 : 1;
+  if (gear.helmet) {
+    const helm = new THREE.Group();
+    const metal = gear.helmet >= 2 ? ARMOR_MATS.steel : ARMOR_MATS.iron;
+    const add = (geo, mat, x, y, z, sx = 1, sy = 1, sz = 1) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.scale.set(sx, sy, sz);
+      helm.add(m);
+      return m;
+    };
+    add(ARMOR_GEO.dome, metal, 0, 0.02, -0.012, 0.095, 0.132, 0.12);
+    add(ARMOR_GEO.rim, metal, 0, 0.022, -0.012, 0.097, 0.12, 0.122);
+    add(ARMOR_GEO.nasal, metal, 0, -0.008, 0.1).rotation.x = -0.12;
+    if (gear.helmet >= 2) {
+      for (const sx of [-1, 1]) add(ARMOR_GEO.cheek, metal, sx * 0.092, -0.026, 0.035).rotation.z = sx * 0.12;
+      add(ARMOR_GEO.neck, metal, 0, -0.024, -0.012, 0.094, 0.09, 0.118);
+    }
+    if (gear.helmet >= 3) add(ARMOR_GEO.crest, ARMOR_MATS.plume, 0, 0.15, -0.02, 0.013, 0.05, 0.1);
+    helm.scale.setScalar(s);
+    J.face.add(helm);
+    u.helm = helm;
+  }
+  if (gear.shield) {
+    const tint = gear.tunic || 0x55636e;
+    if (!SHIELD_MAT_CACHE.has(tint)) SHIELD_MAT_CACHE.set(tint, new THREE.MeshLambertMaterial({ color: shade(tint, 0.85) }));
+    const sh = new THREE.Group();
+    sh.add(new THREE.Mesh(ARMOR_GEO.board, SHIELD_MAT_CACHE.get(tint)));
+    sh.add(new THREE.Mesh(ARMOR_GEO.edge, ARMOR_MATS.iron));
+    const boss = new THREE.Mesh(ARMOR_GEO.boss, ARMOR_MATS.iron);
+    boss.position.x = 0.012;
+    sh.add(boss);
+    sh.position.set(0.075, -0.13, 0.02);       // außen am linken Unterarm
+    J.L.el.add(sh);
+    u.shield = sh;
+  }
 }
 
 function disposeCharacter(root) {

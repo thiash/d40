@@ -84,7 +84,7 @@ function addCreature(e) {
   const model = makeEnemy(e.kind);
   model.position.set(e.x, groundY(e.x, e.z), e.z);
   model.rotation.y = e.ry;
-  const c = { id: e.id, kind: e.kind, model, x: e.x, z: e.z, tx: e.x, tz: e.z, ry: e.ry, hp: e.hp, hpMax: e.hpMax };
+  const c = { id: e.id, kind: e.kind, model, x: e.x, z: e.z, tx: e.x, tz: e.z, ry: e.ry, hp: e.hp, hpMax: e.hpMax, look: e.look || null };
   creatures.set(e.id, c);
   updateCreatureBar(c);
 }
@@ -544,14 +544,58 @@ function updateOthers(dt) {
   }
 }
 
+// Menschen werden erst in der Nähe als Figur gebaut – höchstens eine pro Bild, damit nichts ruckelt
+const FOE_BUILD_DIST = 85, FOE_SHOW_DIST = 110;
+let toneTimer = 0;
+function buildFoe(c) {
+  const def = RULES.enemies[c.kind] || {};
+  const gear = def.gear || {};
+  const fig = makeCharacter(gear.tunic ?? 0x55636e, def.name || '', c.look);
+  setWeaponModel(fig, def.w || 'heavy');
+  dressFoe(fig, gear);
+  fig.position.set(c.x, groundY(c.x, c.z), c.z);
+  fig.rotation.y = c.ry;
+  c.model.userData.fig = fig;
+  c.model.userData.tone = null;
+  toneFoe(c);
+  return fig;
+}
+function toneFoe(c) {                      // Namensschild nach Schwierigkeit färben
+  const u = c.model.userData;
+  if (!u.fig) return;
+  const a = me.self.a;
+  const tone = foeTone(c.kind, a.str + a.sta + a.agi + a.int + a.wis);
+  if (tone === u.tone) return;
+  u.tone = tone;
+  const tag = u.fig.userData.tag;
+  tag.userData.color = TONE_COLORS[tone];
+  drawTag(tag);
+}
+
 function updateCreatures(dt) {
   const k = damp(10, dt);
+  let built = 0;
+  toneTimer -= dt;
+  const retone = toneTimer <= 0;
+  if (retone) toneTimer = 1;
   for (const c of creatures.values()) {
     const px = c.x, pz = c.z;
     c.x = lerp(c.x, c.tx, k);
     c.z = lerp(c.z, c.tz, k);
     const speed = Math.hypot(c.x - px, c.z - pz) / Math.max(dt, 0.001);
-    animateEnemy(c.model, c.x, c.z, c.ry, speed, dt);
+    const u = c.model.userData;
+    if (!u.human) {
+      animateEnemy(c.model, c.x, c.z, c.ry, speed, dt);
+      continue;
+    }
+    const near = Math.hypot(c.x - me.x, c.z - me.z);
+    if (!u.fig && near < FOE_BUILD_DIST && built < 1) { buildFoe(c); built++; }
+    if (u.fig) {
+      u.fig.visible = near < FOE_SHOW_DIST;
+      if (u.fig.visible) animateCharacter(u.fig, c.x, c.z, c.ry, speed, dt);
+      if (retone) toneFoe(c);
+    }
+    c.model.position.set(c.x, groundY(c.x, c.z), c.z);
   }
 }
 

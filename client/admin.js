@@ -16,6 +16,11 @@ const adminUi = {
   give: document.getElementById('admin-give'),
   ban: document.getElementById('admin-ban'),
   vis: document.getElementById('admin-vis'),
+  goStart: document.getElementById('admin-go-start'),
+  goCamp: document.getElementById('admin-go-camp'),
+  goFort: document.getElementById('admin-go-fort'),
+  sum: document.getElementById('admin-sum'),
+  sumSet: document.getElementById('admin-sum-set'),
   note: document.getElementById('admin-note'),
   close: document.getElementById('admin-close'),
 };
@@ -149,3 +154,8 @@ adminUi.ban.addEventListener('click', () => {
   sendAdmin('ban', { name: adminUi.name.value, on: !adminState.pickedBanned });
 });
 adminUi.vis.addEventListener('click', () => sendAdmin('visible', { on: !!(me.self && me.self.hidden) }));
+// Zum Testen: eigene Figur versetzen und die eigene Attributsumme festlegen
+adminUi.goStart.addEventListener('click', () => sendAdmin('travel', { to: 'start' }));
+adminUi.goCamp.addEventListener('click', () => sendAdmin('travel', { to: 'camp' }));
+adminUi.goFort.addEventListener('click', () => sendAdmin('travel', { to: 'fort' }));
+adminUi.sumSet.addEventListener('click', () => sendAdmin('attrs', { sum: Number(adminUi.sum.value) }));

@@ -8,7 +8,16 @@
 const WEAPON_ORDER = ['heavy', 'dagger', 'bow', 'iron_sword', 'iron_dagger', 'longbow'];
 const CRAFTED_WEAPONS = ['iron_sword', 'iron_dagger', 'longbow'];   // nur mit dem Gegenstand in der Tasche
 const ATTR_NAMES = { str: 'Stärke', sta: 'Ausdauer', agi: 'Beweglichkeit', int: 'Intelligenz', wis: 'Weisheit' };
-const DEFEATED = { hare: 'einen Hasen', wolf: 'einen Wolf', boar: 'einen Keiler' };
+const DEFEATED = {
+  hare: 'einen Hasen', wolf: 'einen Wolf', boar: 'einen Keiler',
+  scout: 'einen Späher', guard: 'einen Wächter', merc: 'einen Söldner', mage: 'einen Kampfmagier',
+  veteran: 'einen Veteranen', captain: 'den Hauptmann der Grauwacht',
+};
+// An wem man nichts mehr lernt – Hinweis mit Richtung zur Festung
+const TOO_WEAK = {
+  hare: 'Hasen', wolf: 'Wölfen', boar: 'Keilern', scout: 'Spähern', guard: 'Wächtern', merc: 'Söldnern',
+  mage: 'Kampfmagiern', veteran: 'Veteranen', captain: 'dem Hauptmann',
+};
 const DRAW = {
   heavy: 'Du ziehst das Schwert.',
   dagger: 'Du ziehst den Dolch.',
@@ -177,7 +186,7 @@ function onCombat(msg) {
         lastAttack = performance.now();
         restartRing(ui.attack, me.self.cd);
       }
-      if (msg.w === 'bow' && msg.te) shoot('arrow', model, msg.te);
+      if ((msg.w === 'bow' || msg.w === 'longbow') && msg.te) shoot('arrow', model, msg.te);
       break;
     }
     case 'cast': {
@@ -193,12 +202,24 @@ function onCombat(msg) {
       if (!c) break;
       c.hp = msg.hp;
       updateCreatureBar(c);
-      floatText(c.model, String(msg.dmg), msg.by === me.id ? '#f6e7c4' : '#cfc6ad', 1.3);
+      if (msg.heal) break;               // zurück am Posten: wieder bei voller Kraft
+      floatText(c.model, String(msg.dmg), msg.by === me.id ? '#f6e7c4' : '#cfc6ad', c.model.userData.human ? 2.6 : 1.3);
+      const f = c.model.userData.fig;
+      if (f) f.userData.hurt = 0;
       break;
     }
     case 'hitP': {
       const c = creatures.get(msg.by);
-      if (c) c.model.userData.lunge = 0;
+      if (c) {
+        const u = c.model.userData;
+        u.lunge = 0;
+        if (u.fig) {                     // Menschen: Schwertstreich, Bogenschuss oder Zauber
+          if (msg.r === 'fire') u.fig.userData.cast = 0;
+          else u.fig.userData.swing = 0;
+        }
+        const target = actorModel(msg.id);
+        if (msg.r && target) shoot(msg.r, u.fig || c.model, target);
+      }
       if (msg.id === me.id) {
         me.self.hp = msg.hp;
         if (!msg.dodge) flashHurt();
@@ -234,6 +255,10 @@ function onYou(msg) {
   if (msg.heal) floatText(me.model, `+${msg.heal}`, '#9fe08a', 2.3);
   if (msg.note === 'mana') log('Nicht genug Mana.');
   if (msg.note === 'full') log('Du bist unverletzt.');
+  if (msg.weak) {
+    log(`Von ${TOO_WEAK[msg.weak] || 'diesen Gegnern'} lernst du nichts mehr.`);
+    if (['hare', 'wolf', 'boar'].includes(msg.weak)) log('Stärkere Gegner warten in der Festung Grauwacht im Norden.');
+  }
   if (typeof onItemNotes === 'function') onItemNotes(msg);   // items.js: Beute, Truhe, Last
   if (msg.note === 'notarget') {     // kein Ziel: der Zauber war umsonst, sofort wieder bereit
     log('Kein Ziel in Reichweite.');
@@ -278,7 +303,9 @@ function killCreature(id, by) {
   if (!c) return;
   creatures.delete(id);
   c.model.userData.bar.visible = false;
-  dying.push({ model: c.model, t: 0 });
+  const fig = c.model.userData.fig;
+  if (fig) { fig.userData.ko = true; fig.userData.tag.visible = false; }   // Menschen sinken zu Boden
+  dying.push({ model: c.model, t: 0, x: c.x, z: c.z, ry: c.ry });
   if (by === me.id) log(`Du hast ${DEFEATED[c.kind] || 'ein Tier'} besiegt.`);
 }
 
@@ -333,15 +360,21 @@ const SHOT_MAT = {
 };
 const shots = [];
 const shotEnd = new THREE.Vector3();
-function shoot(kind, fromModel, targetId) {
-  const c = creatures.get(targetId);
-  if (!c) return;
+// Geschoss von einer Figur zu einem Ziel: Ziel ist eine Tier-Nummer oder direkt eine Figur
+function shoot(kind, fromModel, target) {
+  let to = target;
+  if (typeof target === 'number') {
+    const c = creatures.get(target);
+    if (!c) return;
+    to = c.model;
+  }
+  if (!to || !SHOT_GEO[kind]) return;
   const mesh = new THREE.Mesh(SHOT_GEO[kind], SHOT_MAT[kind]);
   const from = new THREE.Vector3(fromModel.position.x, fromModel.position.y + 1.4, fromModel.position.z);
   mesh.position.copy(from);
   scene.add(mesh);
   const speed = kind === 'arrow' ? 32 : 16;
-  shots.push({ mesh, from, target: c.model, t: 0, dur: Math.max(0.12, from.distanceTo(c.model.position) / speed) });
+  shots.push({ mesh, from, target: to, t: 0, dur: Math.max(0.12, from.distanceTo(to.position) / speed) });
 }
 
 const GLOW_GEO = new THREE.TorusGeometry(0.6, 0.05, 4, 18).rotateX(Math.PI / 2);
@@ -370,7 +403,7 @@ function updateFx(dt) {
     const s = shots[i];
     s.t = Math.min(1, s.t + dt / s.dur);
     const p = s.target.position;
-    shotEnd.set(p.x, p.y + 0.5, p.z);
+    shotEnd.set(p.x, p.y + (s.target.userData.human || s.target.userData.j ? 1.1 : 0.5), p.z);
     s.mesh.position.lerpVectors(s.from, shotEnd, s.t);
     s.mesh.lookAt(shotEnd);
     if (s.t >= 1) { scene.remove(s.mesh); shots.splice(i, 1); }
@@ -386,6 +419,14 @@ function updateFx(dt) {
   for (let i = dying.length - 1; i >= 0; i--) {   // besiegte Tiere kippen um und versinken
     const d = dying[i];
     d.t += dt;
+    const fig = d.model.userData.fig;
+    if (fig) {                           // Menschen fallen wie bei einem K.O. und versinken danach
+      animateCharacter(fig, d.x, d.z, d.ry, 0, dt);
+      if (d.t > 2.2) fig.position.y -= (d.t - 2.2) * 0.9;
+      if (d.t > 3.4) { disposeEnemy(d.model); dying.splice(i, 1); }
+      continue;
+    }
+    if (d.model.userData.human) { disposeEnemy(d.model); dying.splice(i, 1); continue; }
     d.model.rotation.z = smooth(Math.min(1, d.t / 0.45)) * Math.PI / 2;
     if (d.t > 0.9) d.model.position.y -= dt * 0.9;
     if (d.t > 1.8) { disposeEnemy(d.model); dying.splice(i, 1); }
